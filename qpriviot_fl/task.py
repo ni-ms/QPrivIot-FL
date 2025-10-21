@@ -1,16 +1,23 @@
-"""QPrivIot-FL: A Flower / PyTorch app."""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import IidPartitioner
+from opacus.validators import ModuleValidator
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Normalize, ToTensor
+from flwr_datasets import FederatedDataset
+from flwr_datasets.partitioner import IidPartitioner
+from opacus import PrivacyEngine
+import numpy as np
+
+# PyTorch transforms for CIFAR-10
+pytorch_transforms = Compose([
+    ToTensor(),
+    Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
 
 
 class Net(nn.Module):
-    """Model (simple CNN adapted from 'PyTorch: A 60 Minute Blitz')"""
+    """Simple CNN for CIFAR-10."""
 
     def __init__(self):
         super(Net, self).__init__()
@@ -32,8 +39,6 @@ class Net(nn.Module):
 
 fds = None  # Cache FederatedDataset
 
-pytorch_transforms = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
 
 def apply_transforms(batch):
     """Apply transforms to the partition from FederatedDataset."""
@@ -42,8 +47,7 @@ def apply_transforms(batch):
 
 
 def load_data(partition_id: int, num_partitions: int):
-    """Load partition CIFAR10 data."""
-    # Only initialize `FederatedDataset` once
+    """Load partition CIFAR-10 data."""
     global fds
     if fds is None:
         partitioner = IidPartitioner(num_partitions=num_partitions)
@@ -52,47 +56,100 @@ def load_data(partition_id: int, num_partitions: int):
             partitioners={"train": partitioner},
         )
     partition = fds.load_partition(partition_id)
-    # Divide data on each node: 80% train, 20% test
     partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
-    # Construct dataloaders
     partition_train_test = partition_train_test.with_transform(apply_transforms)
     trainloader = DataLoader(partition_train_test["train"], batch_size=32, shuffle=True)
     testloader = DataLoader(partition_train_test["test"], batch_size=32)
     return trainloader, testloader
 
 
-def train(net, trainloader, epochs, lr, device):
-    """Train the model on the training set."""
-    net.to(device)  # move model to GPU if available
-    criterion = torch.nn.CrossEntropyLoss().to(device)
+def signal_sensitivity_estimation(data_loader):
+    """
+    Estimate signal sensitivity from data characteristics.
+    In a real implementation, analyze feature variance, gradient norms, etc.
+    """
+    # Placeholder: return random sensitivity factor
+    return np.random.uniform(0.7, 1.3)
+
+
+def train_with_dp(
+        net,
+        trainloader,
+        epochs,
+        lr,
+        device,
+        noise_multiplier,
+        max_grad_norm,
+        target_delta,
+):
+    """Train model with differential privacy using Opacus."""
+
+    net = net.to(device)
+
+    # Make model compatible with Opacus
+    net = ModuleValidator.fix(net)
+
+    criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+
+    # Attach privacy engine
+    privacy_engine = PrivacyEngine()
+    net, optimizer, trainloader = privacy_engine.make_private(
+        module=net,
+        optimizer=optimizer,
+        data_loader=trainloader,
+        noise_multiplier=noise_multiplier,
+        max_grad_norm=max_grad_norm,
+    )
+
     net.train()
     running_loss = 0.0
-    for _ in range(epochs):
+
+    for epoch in range(epochs):
         for batch in trainloader:
             images = batch["img"].to(device)
             labels = batch["label"].to(device)
+
             optimizer.zero_grad()
-            loss = criterion(net(images), labels)
+            outputs = net(images)
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+
             running_loss += loss.item()
-    avg_trainloss = running_loss / len(trainloader)
-    return avg_trainloss
+
+    avg_loss = running_loss / (len(trainloader) * epochs)
+
+    # Get privacy spent
+    epsilon = privacy_engine.get_epsilon(delta=target_delta)
+
+    return avg_loss, epsilon, 0.0, privacy_engine
 
 
 def test(net, testloader, device):
-    """Validate the model on the test set."""
-    net.to(device)
-    criterion = torch.nn.CrossEntropyLoss()
-    correct, loss = 0, 0.0
+    """Evaluate model on test set."""
+    net = net.to(device)
+    net.eval()
+
+    criterion = nn.CrossEntropyLoss()
+    correct = 0
+    total_loss = 0.0
+
     with torch.no_grad():
         for batch in testloader:
             images = batch["img"].to(device)
             labels = batch["label"].to(device)
             outputs = net(images)
-            loss += criterion(outputs, labels).item()
-            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+
+            # Get predictions
+            _, predicted = torch.max(outputs, 1)
+            # Count correct predictions (handles variable batch sizes)
+            correct += int((predicted == labels).sum())
+
     accuracy = correct / len(testloader.dataset)
-    loss = loss / len(testloader)
-    return loss, accuracy
+    avg_loss = total_loss / len(testloader)
+
+    return avg_loss, accuracy
+
