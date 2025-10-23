@@ -1,211 +1,155 @@
-"""QPrivIot-FL: Enhanced server with convergence-aware privacy scheduling and resource-based client selection."""
-from collections import OrderedDict
-import torch
-from flwr.server import ServerApp
-from flwr.serverapp.strategy import FedAvg
-from flwr.server.grid import Grid
-from flwr.common import ArrayRecord, ConfigRecord, Context, MetricRecord
-import numpy as np
+"""Flower server with SecAgg, convergence tracking, and adaptive privacy."""
 
-from qpriviot_fl.task import Net, FEMNISTNet
+from logging import INFO, WARNING
+from typing import List, Tuple, Dict
+
+import torch
+from flwr.common import Context, Metrics, ndarrays_to_parameters, parameters_to_ndarrays, log
+from flwr.server import Grid, LegacyContext, ServerApp, ServerConfig
+from flwr.server.strategy import FedAvg
+from flwr.server.workflow import DefaultWorkflow, SecAggPlusWorkflow
+
+from qpriviot_fl.task import make_model, get_weights, ConvergenceTracker
+from qpriviot_fl.metrics import MetricsLogger, plot_comprehensive_results
+from qpriviot_fl.privacy import PrivacyAccountant
+
+
+def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
+    """Aggregate metrics from clients (weighted by dataset size)."""
+    if not metrics:
+        return {}
+
+    total_examples = sum([num for num, _ in metrics])
+    aggregated = {}
+
+    for key in ["accuracy", "val_accuracy", "train_loss", "val_loss"]:
+        values = [num * m.get(key, 0) for num, m in metrics if key in m]
+        if values:
+            aggregated[key] = sum(values) / total_examples
+
+    for key in ["resource_score", "cpu_percent", "ram_percent", "battery_percent", "bandwidth_mbps"]:
+        values = [m.get(key, 0) for _, m in metrics if key in m]
+        if values:
+            aggregated[key] = sum(values) / len(values)
+
+    epsilons = [m.get("epsilon") for _, m in metrics if m.get("epsilon") is not None]
+    if epsilons:
+        aggregated["avg_epsilon"] = sum(epsilons) / len(epsilons)
+        aggregated["max_epsilon"] = max(epsilons)
+
+    sensitivities = [m.get("avg_sensitivity", 0) for _, m in metrics]
+    if sensitivities:
+        aggregated["avg_sensitivity"] = sum(sensitivities) / len(sensitivities)
+
+    return aggregated
+
+
+convergence_tracker = ConvergenceTracker()
+privacy_accountant = PrivacyAccountant(target_epsilon=10.0)
+metrics_logger = MetricsLogger()
+
+
+def fit_config(server_round: int) -> Dict[str, float]:
+    """Send dynamic config to clients each round."""
+    convergence_score = convergence_tracker.get_convergence_score()
+    return {
+        "convergence_score": convergence_score,
+        "current_round": server_round - 1,
+    }
+
+
+def fit_metrics_aggregation(metrics: List[Tuple[int, Metrics]]) -> Metrics:
+    """Aggregate fit metrics and update trackers."""
+    aggregated = weighted_average(metrics)
+
+    if "val_loss" in aggregated:
+        convergence_tracker.update(aggregated["val_loss"])
+
+    if "avg_epsilon" in aggregated:
+        privacy_accountant.add_round(aggregated["avg_epsilon"])
+
+    round_metrics = {
+        "convergence_score": convergence_tracker.get_convergence_score(),
+        **aggregated
+    }
+    metrics_logger.log_round(round_metrics)
+
+    log(INFO, f"Val Accuracy: {aggregated.get('val_accuracy', 0) * 100:.2f}%")
+    log(INFO, f"Val Loss: {aggregated.get('val_loss', 0):.4f}")
+    if "avg_epsilon" in aggregated:
+        log(INFO, f"Avg Privacy (ε): {aggregated['avg_epsilon']:.4f}")
+    log(INFO, f"Convergence Score: {convergence_tracker.get_convergence_score():.4f}")
+
+    return aggregated
+
 
 app = ServerApp()
-
-INITIAL_PRIVACY_BUDGET = 2.0
-MIN_PRIVACY_BUDGET = 0.5
-DECAY_RATE = 0.9
-
-
-class AdaptivePrivacyScheduler:
-    """Convergence-aware privacy budget scheduler."""
-
-    def __init__(self, initial_budget, min_budget, decay_rate):
-        self.current_budget = initial_budget
-        self.min_budget = min_budget
-        self.decay_rate = decay_rate
-        self.loss_history = []
-        self.acc_history = []
-
-    def update(self, round_num, avg_loss, avg_acc):
-        """Update privacy budget based on convergence metrics."""
-        self.loss_history.append(avg_loss)
-        self.acc_history.append(avg_acc)
-
-        if len(self.loss_history) >= 3:
-            recent_loss_change = abs(self.loss_history[-1] - self.loss_history[-2])
-
-            if recent_loss_change < 0.01:
-
-                adaptive_decay = self.decay_rate * 0.85
-            elif recent_loss_change > 0.1:
-
-                adaptive_decay = self.decay_rate * 1.1
-            else:
-
-                adaptive_decay = self.decay_rate
-        else:
-
-            adaptive_decay = self.decay_rate
-
-        self.current_budget = max(self.min_budget, self.current_budget * adaptive_decay)
-
-        return self.current_budget
-
-    def get_budget(self):
-        """Get current privacy budget."""
-        return self.current_budget
-
-
-class ResourceAwareClientSelector:
-    """Select clients based on resource availability."""
-
-    def __init__(self, min_battery=20, min_resource_score=0.3):
-        self.min_battery = min_battery
-        self.min_resource_score = min_resource_score
-        self.client_metrics = {}
-
-    def update_client_metrics(self, client_metrics_list):
-        """Store client resource metrics from last round."""
-        for metrics in client_metrics_list:
-            client_id = metrics.get("client_id", "unknown")
-            self.client_metrics[client_id] = {
-                "battery_percent": metrics.get("battery_percent", 100),
-                "resource_score": metrics.get("resource_score", 0.5),
-                "energy_consumed": metrics.get("energy_consumed", 0),
-            }
-
-    def is_client_eligible(self, client_id):
-        """Check if client meets minimum resource requirements."""
-        if client_id not in self.client_metrics:
-            return True
-
-        metrics = self.client_metrics[client_id]
-        battery_ok = metrics["battery_percent"] >= self.min_battery
-        resource_ok = metrics["resource_score"] >= self.min_resource_score
-
-        return battery_ok and resource_ok
-
-    def get_client_priority(self, client_id):
-        """Calculate client priority score for selection."""
-        if client_id not in self.client_metrics:
-            return 0.5
-
-        metrics = self.client_metrics[client_id]
-
-        priority = (
-                metrics["battery_percent"] / 100 * 0.5 +
-                metrics["resource_score"] * 0.5
-        )
-
-        return priority
 
 
 @app.main()
 def main(grid: Grid, context: Context) -> None:
-    """Main entry point for the ServerApp with adaptive features."""
+    """Main server logic with adaptive privacy and convergence tracking."""
 
-    fraction_train = context.run_config.get("fraction-train", 0.5)
-    num_rounds = context.run_config.get("num-server-rounds", 10)
-    lr = context.run_config.get("lr", 0.001)
     dataset_name = context.run_config.get("dataset", "cifar10")
+    num_rounds = context.run_config["num-server-rounds"]
+    use_secagg = context.run_config.get("use-secagg", True)
 
-    if dataset_name == "cifar10":
-        global_model = Net()
-    elif dataset_name == "femnist":
-        global_model = FEMNISTNet()
-    else:
-        global_model = Net()
-
-    state_dict = global_model.state_dict()
-    arrays = ArrayRecord(OrderedDict(state_dict))
-
-    privacy_scheduler = AdaptivePrivacyScheduler(
-        INITIAL_PRIVACY_BUDGET, MIN_PRIVACY_BUDGET, DECAY_RATE
-    )
-    client_selector = ResourceAwareClientSelector(min_battery=20, min_resource_score=0.3)
+    global_model = make_model(dataset_name)
+    initial_params = ndarrays_to_parameters(get_weights(global_model))
 
     strategy = FedAvg(
-        fraction_train=fraction_train,
-        fraction_evaluate=1.0,
-        min_available_nodes=2,
+        fraction_fit=context.run_config.get("fraction-fit", 0.8),
+        fraction_evaluate=context.run_config.get("fraction-evaluate", 0.5),
+        min_fit_clients=context.run_config.get("min-fit-clients", 3),
+        min_available_clients=context.run_config.get("min-available-clients", 3),
+        evaluate_metrics_aggregation_fn=weighted_average,
+        fit_metrics_aggregation_fn=fit_metrics_aggregation,
+        on_fit_config_fn=fit_config,
+        initial_parameters=initial_params,
     )
 
-    round_metrics = {
-        "round": [],
-        "privacy_budget": [],
-        "avg_loss": [],
-        "avg_accuracy": [],
-        "avg_epsilon": [],
-        "avg_energy": [],
-        "num_clients": [],
-    }
+    legacy_context = LegacyContext(
+        context=context,
+        config=ServerConfig(num_rounds=num_rounds),
+        strategy=strategy,
+    )
 
-    for round_num in range(num_rounds):
-        current_budget = privacy_scheduler.get_budget()
-
-        print(f"\n{'=' * 60}")
-        print(f"Round {round_num + 1}/{num_rounds}")
-        print(f"Privacy Budget: {current_budget:.4f}")
-        print(f"{'=' * 60}")
-
-        train_config = ConfigRecord({
-            "lr": lr,
-            "privacy_budget": current_budget
-        })
-
-        result = strategy.start(
-            grid=grid,
-            initial_arrays=arrays,
-            train_config=train_config,
-            num_rounds=1,
+    if use_secagg:
+        fit_workflow = SecAggPlusWorkflow(
+            num_shares=context.run_config.get("num-shares", 3),
+            reconstruction_threshold=context.run_config.get("reconstruction-threshold", 2),
+            max_weight=context.run_config.get("max-weight", 1000),
         )
+        log(INFO, "Using SecAgg+ for secure aggregation")
+    else:
+        fit_workflow = None
+        log(WARNING, "SecAgg disabled - using standard aggregation")
 
-        arrays = result.arrays
+    workflow = DefaultWorkflow(fit_workflow=fit_workflow) if use_secagg else DefaultWorkflow()
 
-        if hasattr(result, 'metrics') and result.metrics:
-            metrics_data = result.metrics
+    log(INFO, f"Starting federated training for {num_rounds} rounds on {dataset_name}")
+    workflow(grid, legacy_context)
 
-            avg_loss = metrics_data.get("train_loss", 0.0)
-            avg_acc = metrics_data.get("train_acc", 0.0)
-            avg_epsilon = metrics_data.get("dp_epsilon", 0.0)
-            avg_energy = metrics_data.get("energy_consumed", 0.0)
-            num_clients = metrics_data.get("num_clients", 0)
+    log(INFO, f"\n{'=' * 60}")
+    log(INFO, "Training Complete!")
+    log(INFO, f"{'=' * 60}")
 
-            new_budget = privacy_scheduler.update(round_num, avg_loss, avg_acc)
+    privacy_report = privacy_accountant.get_privacy_report()
+    log(INFO, f"Total Privacy Spent (ε): {privacy_report['total_epsilon']:.4f}")
+    log(INFO, f"Rounds Completed: {privacy_report['rounds_completed']}")
 
-            round_metrics["round"].append(round_num + 1)
-            round_metrics["privacy_budget"].append(current_budget)
-            round_metrics["avg_loss"].append(avg_loss)
-            round_metrics["avg_accuracy"].append(avg_acc)
-            round_metrics["avg_epsilon"].append(avg_epsilon)
-            round_metrics["avg_energy"].append(avg_energy)
-            round_metrics["num_clients"].append(num_clients)
+    if hasattr(strategy, 'parameters') and strategy.parameters is not None:
+        final_ndarrays = parameters_to_ndarrays(strategy.parameters)
+        param_keys = list(global_model.state_dict().keys())
+        state_dict = {k: torch.tensor(v) for k, v in zip(param_keys, final_ndarrays)}
+        torch.save(state_dict, f"final_model_{dataset_name}.pt")
+        log(INFO, f"Model saved to final_model_{dataset_name}.pt")
 
-            print(f"Avg Train Loss: {avg_loss:.4f}")
-            print(f"Avg Train Accuracy: {avg_acc:.4f}")
-            print(f"Avg Epsilon: {avg_epsilon:.4f}")
-            print(f"Avg Energy Consumed: {avg_energy:.4f}%")
-            print(f"Next Round Budget: {new_budget:.4f}")
-
-    print(f"\n{'=' * 60}")
-    print("Training Complete! Saving final model...")
-    print(f"{'=' * 60}")
-
-    state_dict = arrays.to_torch_state_dict()
-    torch.save(state_dict, f"final_model_{dataset_name}.pt")
-
-    np.savez(
-        f"training_metrics_{dataset_name}.npz",
-        **round_metrics
-    )
-
-    print(f"\nModel saved to: final_model_{dataset_name}.pt")
-    print(f"Metrics saved to: training_metrics_{dataset_name}.npz")
-
-    print(f"\n{'=' * 60}")
-    print("Training Summary:")
-    print(f"{'=' * 60}")
-    print(f"Final Loss: {round_metrics['avg_loss'][-1]:.4f}")
-    print(f"Final Accuracy: {round_metrics['avg_accuracy'][-1]:.4f}")
-    print(f"Total Privacy Spent (avg epsilon): {round_metrics['avg_epsilon'][-1]:.4f}")
-    print(f"Total Energy Consumed (avg): {sum(round_metrics['avg_energy']):.2f}%")
+    if len(metrics_logger.get_all_metrics()) > 0:
+        metrics_logger.save_to_file(f"training_metrics_{dataset_name}.json")
+        plot_comprehensive_results(
+            metrics_logger.get_all_metrics(),
+            privacy_report,
+            save_path=f"results_{dataset_name}.png"
+        )
+        log(INFO, "Results saved and visualized!")
