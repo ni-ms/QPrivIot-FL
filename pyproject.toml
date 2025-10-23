@@ -40,18 +40,9 @@ clientapp = "qpriviot_fl.client_app:app"
 # Custom config values accessible via `context.run_config`
 [tool.flwr.app.config]
 num-server-rounds = 3
-fraction-fit = 0.8
-fraction-evaluate = 0.5
-min-fit-clients = 3
-min-available-clients = 3
-batch-size = 32
-local-epochs = 2
-learning-rate = 0.001
-dataset = "cifar10"
-use-secagg = true
-num-shares = 3
-reconstruction-threshold = 2
-max-weight = 1000
+fraction-train = 0.5
+local-epochs = 1
+lr = 0.01
 
 # Default federation to use when running the app
 [tool.flwr.federations]

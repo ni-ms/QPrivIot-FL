@@ -1,18 +1,15 @@
-"""Adaptive differential privacy - FIXED for Flower simulation."""
+"""Adaptive differential privacy with Opacus integration."""
 
 import torch
 from opacus import PrivacyEngine
 from opacus.validators import ModuleValidator
 from typing import Dict, Optional, Tuple, List
+import math
 
 
 def prepare_model_for_dp(model: torch.nn.Module) -> torch.nn.Module:
-    """Make model compatible with Opacus - returns a NEW model instance."""
-
-    errors = ModuleValidator.validate(model, strict=False)
-    if errors:
-        model = ModuleValidator.fix(model)
-    return model
+    """Make model compatible with Opacus."""
+    return ModuleValidator.fix(model)
 
 
 def attach_dp_to_optimizer(
@@ -24,31 +21,19 @@ def attach_dp_to_optimizer(
         device: torch.device
 ) -> Tuple[torch.nn.Module, torch.optim.Optimizer, torch.utils.data.DataLoader, PrivacyEngine]:
     """
-    Wrap model and optimizer with Opacus PrivacyEngine.
-    FIXED: Handles Flower simulation environment properly.
+    Wrap model and optimizer with Opacus PrivacyEngine for DP-SGD.
     """
-
     model = prepare_model_for_dp(model)
 
-    optimizer_class = type(optimizer)
-    optimizer_state = optimizer.state_dict()
-    lr = optimizer.param_groups[0]['lr']
+    privacy_engine = PrivacyEngine()
 
-    optimizer = optimizer_class(model.parameters(), lr=lr)
-
-    privacy_engine = PrivacyEngine(secure_mode=False)
-
-    try:
-        model, optimizer, dataloader = privacy_engine.make_private(
-            module=model,
-            optimizer=optimizer,
-            data_loader=dataloader,
-            noise_multiplier=noise_multiplier,
-            max_grad_norm=max_grad_norm,
-        )
-    except Exception as e:
-        print(f"Opacus attachment failed: {e}")
-        raise
+    model, optimizer, dataloader = privacy_engine.make_private(
+        module=model,
+        optimizer=optimizer,
+        data_loader=dataloader,
+        noise_multiplier=noise_multiplier,
+        max_grad_norm=max_grad_norm,
+    )
 
     return model, optimizer, dataloader, privacy_engine
 
@@ -63,7 +48,14 @@ def compute_adaptive_dp_config(
         min_noise: float = 0.2,
         base_clipping: float = 1.0
 ) -> Dict[str, float]:
-    """Compute adaptive DP configuration."""
+    """
+    Compute adaptive DP configuration based on:
+    - Device resources (constrained devices get more noise)
+    - Data sensitivity (sensitive data gets more noise)
+    - Training progress (reduce noise as training converges)
+
+    Returns: DP configuration dict with noise_multiplier and max_grad_norm
+    """
 
     resource_score = device_profile.get("resource_score", 0.5)
     device_factor = 1.0 - resource_score
@@ -101,17 +93,21 @@ class PrivacyAccountant:
         self.total_epsilon = 0.0
 
     def add_round(self, epsilon: Optional[float]):
-        if epsilon is not None and epsilon > 0:
+        """Record epsilon spent in a round."""
+        if epsilon is not None:
             self.epsilons_per_round.append(epsilon)
             self.total_epsilon += epsilon
 
     def get_remaining_budget(self) -> float:
+        """Get remaining privacy budget."""
         return max(0.0, self.target_epsilon - self.total_epsilon)
 
     def is_budget_exceeded(self) -> bool:
+        """Check if privacy budget is exhausted."""
         return self.total_epsilon >= self.target_epsilon
 
     def get_privacy_report(self) -> Dict:
+        """Generate privacy consumption report."""
         return {
             "total_epsilon": self.total_epsilon,
             "target_epsilon": self.target_epsilon,
@@ -121,9 +117,52 @@ class PrivacyAccountant:
         }
 
 
-def generate_dp_noise(shape: Tuple[int, ...], stddev: float, device: torch.device) -> torch.Tensor:
-    """Classical Gaussian noise (quantum-ready hook)."""
+def generate_dp_noise_classical(
+        shape: Tuple[int, ...],
+        stddev: float,
+        device: torch.device
+) -> torch.Tensor:
+    """
+    Classical Gaussian noise generation for DP.
+    This is the default implementation.
+    """
     return torch.randn(shape, device=device) * stddev
 
 
+def generate_dp_noise_quantum(
+        shape: Tuple[int, ...],
+        stddev: float,
+        device: torch.device
+) -> torch.Tensor:
+    """
+    PLACEHOLDER for quantum noise generation.
+
+    To integrate quantum RNG:
+    1. Use quantum hardware API (IBM Q, Rigetti, etc.)
+    2. Generate truly random bits from quantum source
+    3. Convert to Gaussian distribution using Box-Muller transform
+    4. Return tensor with same shape
+
+    Example integration with IBM Qiskit:
+        from qiskit import QuantumCircuit, execute, Aer
+    """
+
+    return generate_dp_noise_classical(shape, stddev, device)
+
+
 USE_QUANTUM_NOISE = False
+
+
+def generate_dp_noise(
+        shape: Tuple[int, ...],
+        stddev: float,
+        device: torch.device
+) -> torch.Tensor:
+    """
+    Main noise generation function.
+    Automatically uses quantum or classical based on USE_QUANTUM_NOISE flag.
+    """
+    if USE_QUANTUM_NOISE:
+        return generate_dp_noise_quantum(shape, stddev, device)
+    else:
+        return generate_dp_noise_classical(shape, stddev, device)

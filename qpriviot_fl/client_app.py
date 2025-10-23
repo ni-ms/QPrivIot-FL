@@ -1,4 +1,4 @@
-"""Flower client with SecAgg, adaptive DP, and device profiling - FINAL FIX."""
+"""Flower client with SecAgg, adaptive DP, and device profiling."""
 
 import torch
 from flwr.client import ClientApp, NumPyClient
@@ -23,6 +23,7 @@ class QPrivIoTClient(NumPyClient):
             dataset_name: str,
             total_rounds: int,
     ):
+        self.model = make_model(dataset_name)
         self.trainloader = trainloader
         self.valloader = valloader
         self.local_epochs = local_epochs
@@ -38,22 +39,16 @@ class QPrivIoTClient(NumPyClient):
         device_profile = profile_device()
 
         if not is_eligible_for_training(device_profile):
-            print(f"Client dropped: resource_score={device_profile['resource_score']:.2f}")
+            print(f"Client dropped due to insufficient resources: {device_profile['resource_score']:.2f}")
 
-            dummy_model = make_model(self.dataset_name)
-            return get_weights(dummy_model), len(self.trainloader.dataset), {
-                "dropped": 1,
-                "resource_score": device_profile['resource_score'],
-                "cpu_percent": device_profile['cpu_percent'],
-                "ram_percent": device_profile['ram_percent'],
-                "battery_percent": device_profile['battery_percent'],
-                "bandwidth_mbps": device_profile['bandwidth_mbps'],
+            return get_weights(self.model), len(self.trainloader.dataset), {
+                "dropped": True,
+                **device_profile
             }
 
-        model = make_model(self.dataset_name)
-        set_weights(model, parameters)
+        set_weights(self.model, parameters)
 
-        sensitivities = analyze_model_sensitivity(model)
+        sensitivities = analyze_model_sensitivity(self.model)
         avg_sensitivity = get_average_sensitivity(sensitivities)
 
         convergence_score = config.get("convergence_score", 0.0)
@@ -68,7 +63,7 @@ class QPrivIoTClient(NumPyClient):
         )
 
         results = train(
-            model,
+            self.model,
             self.trainloader,
             self.valloader,
             self.local_epochs,
@@ -79,33 +74,20 @@ class QPrivIoTClient(NumPyClient):
         )
 
         metrics = {
-            "train_loss": float(results.get("train_loss", 0.0)),
-            "val_loss": float(results.get("val_loss", 0.0)),
-            "val_accuracy": float(results.get("val_accuracy", 0.0)),
-            "epsilon": float(results.get("epsilon", 0.0)) if results.get("epsilon") is not None else 0.0,
-            "resource_score": float(device_profile["resource_score"]),
-            "cpu_percent": float(device_profile["cpu_percent"]),
-            "ram_percent": float(device_profile["ram_percent"]),
-            "battery_percent": float(device_profile["battery_percent"]),
-            "bandwidth_mbps": float(device_profile["bandwidth_mbps"]),
-            "avg_sensitivity": float(avg_sensitivity),
-            "noise_multiplier": float(dp_config["noise_multiplier"]),
-            "max_grad_norm": float(dp_config["max_grad_norm"]),
+            **results,
+            **device_profile,
+            "avg_sensitivity": avg_sensitivity,
+            "noise_multiplier": dp_config["noise_multiplier"],
+            "max_grad_norm": dp_config["max_grad_norm"],
         }
 
-        metrics = {k: v for k, v in metrics.items() if v is not None}
-
-        return get_weights(model), len(self.trainloader.dataset), metrics
+        return get_weights(self.model), len(self.trainloader.dataset), metrics
 
     def evaluate(self, parameters, config):
         """Evaluate model."""
-        model = make_model(self.dataset_name)
-        set_weights(model, parameters)
-        loss, accuracy = test(model, self.valloader, self.device, self.dataset_name)
-
-        return float(loss), len(self.valloader.dataset), {
-            "accuracy": float(accuracy)
-        }
+        set_weights(self.model, parameters)
+        loss, accuracy = test(self.model, self.valloader, self.device, self.dataset_name)
+        return loss, len(self.valloader.dataset), {"accuracy": accuracy}
 
 
 def client_fn(context: Context):
