@@ -1,0 +1,40 @@
+# QPrivIoT-FL Configuration
+
+# Dataset options: cifar10, femnist, iot
+dataset: "cifar10"
+
+# Training
+num_server_rounds: 20
+local_epochs: 2
+batch_size: 32
+learning_rate: 0.001
+
+# Federated Learning
+num_clients: 10
+fraction_fit: 0.8
+fraction_evaluate: 0.5
+min_fit_clients: 3
+min_available_clients: 3
+
+# Secure Aggregation (SecAgg+)
+use_secagg: true
+num_shares: 3
+reconstruction_threshold: 2
+max_weight: 1000
+
+# Privacy
+target_epsilon: 10.0
+target_delta: 1.0e-5
+base_noise: 1.2
+min_noise: 0.2
+base_clipping: 1.0
+
+# Device Profiling Thresholds
+min_cpu_available: 30.0
+min_ram_available: 30.0
+min_battery: 20.0
+min_bandwidth: 5.0
+
+# Convergence
+convergence_window: 5
+convergence_threshold: 0.01

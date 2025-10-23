@@ -1,19 +1,22 @@
-"""QPrivIot-FL: A Flower / PyTorch app."""
+"""Model, data loading, training, and testing with multi-dataset support."""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import IidPartitioner
-from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, Normalize, ToTensor
+from torchvision.transforms import Compose, Normalize, ToTensor, Grayscale, Resize
+from typing import Tuple, Optional, Dict
+from collections import OrderedDict
+import numpy as np
 
 
 class Net(nn.Module):
-    """Model (simple CNN adapted from 'PyTorch: A 60 Minute Blitz')"""
+    """Simple CNN for CIFAR-10"""
 
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)
@@ -30,69 +33,291 @@ class Net(nn.Module):
         return self.fc3(x)
 
 
-fds = None  # Cache FederatedDataset
+class FEMNISTNet(nn.Module):
+    """CNN for FEMNIST (28x28 grayscale, 62 classes)"""
 
-pytorch_transforms = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    def __init__(self, num_classes=62):
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 32, 5)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(32, 64, 5)
+        self.fc1 = nn.Linear(64 * 4 * 4, 512)
+        self.fc2 = nn.Linear(512, num_classes)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = x.view(-1, 64 * 4 * 4)
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
 
 
-def apply_transforms(batch):
-    """Apply transforms to the partition from FederatedDataset."""
-    batch["img"] = [pytorch_transforms(img) for img in batch["img"]]
-    return batch
+class IoTSensorNet(nn.Module):
+    """Simple MLP for IoT sensor data (simulated)"""
+
+    def __init__(self, input_dim=10, num_classes=3):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, num_classes)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
 
 
-def load_data(partition_id: int, num_partitions: int):
-    """Load partition CIFAR10 data."""
-    # Only initialize `FederatedDataset` once
-    global fds
-    if fds is None:
-        partitioner = IidPartitioner(num_partitions=num_partitions)
-        fds = FederatedDataset(
-            dataset="uoft-cs/cifar10",
-            partitioners={"train": partitioner},
-        )
+def make_model(dataset_name: str = "cifar10"):
+    """Factory function to create appropriate model for dataset."""
+    if dataset_name == "cifar10":
+        return Net()
+    elif dataset_name == "femnist":
+        return FEMNISTNet()
+    elif dataset_name == "iot":
+        return IoTSensorNet()
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}")
+
+
+def load_data(
+        partition_id: int,
+        num_partitions: int,
+        batch_size: int = 32,
+        dataset_name: str = "cifar10"
+) -> Tuple[DataLoader, DataLoader]:
+    """
+    Load partitioned data for FL.
+    Supports: cifar10, femnist, iot (simulated)
+    """
+    if dataset_name == "cifar10":
+        return load_cifar10(partition_id, num_partitions, batch_size)
+    elif dataset_name == "femnist":
+        return load_femnist(partition_id, num_partitions, batch_size)
+    elif dataset_name == "iot":
+        return load_iot_simulated(partition_id, num_partitions, batch_size)
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}")
+
+
+def load_cifar10(partition_id: int, num_partitions: int, batch_size: int):
+    """Load CIFAR-10 partition."""
+    partitioner = IidPartitioner(num_partitions=num_partitions)
+    fds = FederatedDataset(
+        dataset="uoft-cs/cifar10",
+        partitioners={"train": partitioner},
+    )
     partition = fds.load_partition(partition_id)
-    # Divide data on each node: 80% train, 20% test
-    partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
-    # Construct dataloaders
-    partition_train_test = partition_train_test.with_transform(apply_transforms)
-    trainloader = DataLoader(partition_train_test["train"], batch_size=32, shuffle=True)
-    testloader = DataLoader(partition_train_test["test"], batch_size=32)
+    partition_split = partition.train_test_split(test_size=0.2, seed=42)
+
+    transforms = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+    def apply_transforms(batch):
+        batch["img"] = [transforms(img) for img in batch["img"]]
+        return batch
+
+    partition_split = partition_split.with_transform(apply_transforms)
+    trainloader = DataLoader(partition_split["train"], batch_size=batch_size, shuffle=True)
+    testloader = DataLoader(partition_split["test"], batch_size=batch_size)
+
     return trainloader, testloader
 
 
-def train(net, trainloader, epochs, lr, device):
-    """Train the model on the training set."""
-    net.to(device)  # move model to GPU if available
-    criterion = torch.nn.CrossEntropyLoss().to(device)
-    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
-    net.train()
-    running_loss = 0.0
-    for _ in range(epochs):
+def load_femnist(partition_id: int, num_partitions: int, batch_size: int):
+    """Load FEMNIST partition."""
+    try:
+        partitioner = IidPartitioner(num_partitions=num_partitions)
+        fds = FederatedDataset(
+            dataset="flwrlabs/femnist",
+            partitioners={"train": partitioner},
+        )
+        partition = fds.load_partition(partition_id)
+        partition_split = partition.train_test_split(test_size=0.2, seed=42)
+
+        transforms = Compose([Resize((28, 28)), Grayscale(), ToTensor(), Normalize((0.5,), (0.5,))])
+
+        def apply_transforms(batch):
+            batch["image"] = [transforms(img) for img in batch["image"]]
+            return batch
+
+        partition_split = partition_split.with_transform(apply_transforms)
+        trainloader = DataLoader(partition_split["train"], batch_size=batch_size, shuffle=True)
+        testloader = DataLoader(partition_split["test"], batch_size=batch_size)
+
+        return trainloader, testloader
+    except Exception as e:
+        print(f"FEMNIST loading failed: {e}. Using CIFAR-10 as fallback.")
+        return load_cifar10(partition_id, num_partitions, batch_size)
+
+
+def load_iot_simulated(partition_id: int, num_partitions: int, batch_size: int):
+    """Simulated IoT sensor data (placeholder)."""
+
+    np.random.seed(partition_id)
+    n_samples = 1000
+    X = np.random.randn(n_samples, 10).astype(np.float32)
+    y = np.random.randint(0, 3, n_samples).astype(np.int64)
+
+    dataset = torch.utils.data.TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
+    train_size = int(0.8 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+
+    trainloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    testloader = DataLoader(test_dataset, batch_size=batch_size)
+
+    return trainloader, testloader
+
+
+def get_weights(model: nn.Module) -> list:
+    """Extract model weights as numpy arrays."""
+    return [val.cpu().numpy() for _, val in model.state_dict().items()]
+
+
+def set_weights(model: nn.Module, weights: list):
+    """Set model weights from numpy arrays."""
+    params_dict = zip(model.state_dict().keys(), weights)
+    state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+    model.load_state_dict(state_dict, strict=True)
+
+
+def train(
+        model: nn.Module,
+        trainloader: DataLoader,
+        valloader: DataLoader,
+        epochs: int,
+        learning_rate: float,
+        device: torch.device,
+        dp_config: Optional[Dict] = None,
+        dataset_name: str = "cifar10"
+) -> Dict:
+    """
+    Train model with optional DP.
+    Returns training metrics and privacy epsilon.
+    """
+    model.to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    privacy_engine = None
+    if dp_config:
+        from qpriviot_fl.privacy import attach_dp_to_optimizer
+        model, optimizer, trainloader, privacy_engine = attach_dp_to_optimizer(
+            model, optimizer, trainloader,
+            dp_config["noise_multiplier"],
+            dp_config["max_grad_norm"],
+            device
+        )
+
+    model.train()
+    total_loss = 0.0
+
+    for epoch in range(epochs):
+        epoch_loss = 0.0
         for batch in trainloader:
-            images = batch["img"].to(device)
-            labels = batch["label"].to(device)
+            if dataset_name == "iot":
+                images, labels = batch
+            else:
+                images = batch["img"] if "img" in batch else batch["image"]
+                labels = batch["label"]
+
+            images, labels = images.to(device), labels.to(device)
+
             optimizer.zero_grad()
-            loss = criterion(net(images), labels)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-            running_loss += loss.item()
-    avg_trainloss = running_loss / len(trainloader)
-    return avg_trainloss
+
+            epoch_loss += loss.item()
+
+        total_loss += epoch_loss / len(trainloader)
+
+    avg_train_loss = total_loss / epochs
+
+    val_loss, val_acc = test(model, valloader, device, dataset_name)
+
+    epsilon = None
+    if privacy_engine:
+        try:
+            epsilon = privacy_engine.get_epsilon(delta=1e-5)
+        except:
+            epsilon = None
+
+    return {
+        "train_loss": avg_train_loss,
+        "val_loss": val_loss,
+        "val_accuracy": val_acc,
+        "epsilon": epsilon,
+    }
 
 
-def test(net, testloader, device):
-    """Validate the model on the test set."""
-    net.to(device)
-    criterion = torch.nn.CrossEntropyLoss()
-    correct, loss = 0, 0.0
+def test(
+        model: nn.Module,
+        testloader: DataLoader,
+        device: torch.device,
+        dataset_name: str = "cifar10"
+) -> Tuple[float, float]:
+    """Evaluate model."""
+    model.to(device)
+    model.eval()
+    criterion = nn.CrossEntropyLoss()
+
+    correct, total_loss = 0, 0.0
+    total_samples = 0
+
     with torch.no_grad():
         for batch in testloader:
-            images = batch["img"].to(device)
-            labels = batch["label"].to(device)
-            outputs = net(images)
-            loss += criterion(outputs, labels).item()
-            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
-    accuracy = correct / len(testloader.dataset)
-    loss = loss / len(testloader)
-    return loss, accuracy
+            if dataset_name == "iot":
+                images, labels = batch
+            else:
+                images = batch["img"] if "img" in batch else batch["image"]
+                labels = batch["label"]
+
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+            total_loss += loss.item()
+            predictions = torch.max(outputs, 1)[1]
+            correct += (predictions == labels).sum().item()
+            total_samples += labels.size(0)
+
+    accuracy = correct / total_samples if total_samples > 0 else 0.0
+    avg_loss = total_loss / len(testloader) if len(testloader) > 0 else 0.0
+
+    return avg_loss, accuracy
+
+
+class ConvergenceTracker:
+    """Track training convergence for adaptive privacy scheduling."""
+
+    def __init__(self, window_size: int = 5, threshold: float = 0.01):
+        self.window_size = window_size
+        self.threshold = threshold
+        self.loss_history = []
+
+    def update(self, loss: float):
+        """Add new loss value."""
+        self.loss_history.append(loss)
+        if len(self.loss_history) > self.window_size:
+            self.loss_history.pop(0)
+
+    def get_convergence_score(self) -> float:
+        """
+        Compute convergence score [0, 1].
+        1 = fully converged, 0 = not converged.
+        """
+        if len(self.loss_history) < 2:
+            return 0.0
+
+        recent_losses = self.loss_history[-self.window_size:]
+        loss_std = np.std(recent_losses)
+        loss_change = abs(recent_losses[-1] - recent_losses[0])
+
+        convergence = 1.0 - min(1.0, loss_change / self.threshold)
+
+        return convergence
+
+    def is_converged(self) -> bool:
+        """Check if training has converged."""
+        return self.get_convergence_score() > 0.8
