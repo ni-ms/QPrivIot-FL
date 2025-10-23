@@ -1,4 +1,4 @@
-"""QPrivIot-FL: Enhanced client with energy tracking and adaptive features."""
+"""QPrivIot-FL: Fixed client with proper state_dict handling."""
 import torch
 from flwr.client import ClientApp
 from flwr.common import ArrayRecord, MetricRecord, RecordDict, Message, Context
@@ -48,17 +48,14 @@ class EnergyTracker:
 
 
 def device_profiling():
-    """Enhanced device profiling: CPU, RAM, battery, network bandwidth."""
+    """Enhanced device profiling."""
     try:
         cpu_percent = psutil.cpu_percent(interval=0.1)
         mem_percent = psutil.virtual_memory().percent
         battery = psutil.sensors_battery()
         battery_percent = battery.percent if battery else 100.0
-
         cpu_count = psutil.cpu_count()
-
         available_mem_gb = psutil.virtual_memory().available / (1024 ** 3)
-
     except Exception:
         cpu_percent = 50.0
         mem_percent = 50.0
@@ -107,14 +104,26 @@ def train(msg: Message, context: Context):
 
     dataset_name = context.run_config.get("dataset", "cifar10")
 
-    if dataset_name == "cifar10":
-        model = Net()
-    elif dataset_name == "femnist":
+    if dataset_name == "femnist":
         model = FEMNISTNet()
     else:
         model = Net()
 
-    model.load_state_dict(msg.content["arrays"].to_torch_state_dict())
+    try:
+
+        if "arrays" in msg.content:
+            received_state_dict = msg.content["arrays"].to_torch_state_dict()
+
+            if len(received_state_dict) == 0:
+                print("Warning: Received empty state_dict, using initial model")
+            else:
+                model.load_state_dict(received_state_dict, strict=True)
+        else:
+            print("Warning: No arrays in message, using initial model")
+    except Exception as e:
+        print(f"Error loading state_dict: {e}")
+        print("Using initial model weights")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -138,11 +147,8 @@ def train(msg: Message, context: Context):
     local_epochs = adjust_local_epochs(dp_profile, base_local_epochs)
 
     base_noise = 1.0 / privacy_budget
-
     resource_factor = 0.8 + (1.0 - dp_profile["resource_score"]) * 0.4
-
     noise_multiplier = base_noise * global_sensitivity * resource_factor
-
     noise_multiplier = np.clip(noise_multiplier, 0.1, 5.0)
 
     max_grad_norm = 1.0
@@ -164,15 +170,23 @@ def train(msg: Message, context: Context):
 
     energy_metrics = energy_tracker.stop()
 
-    model_record = ArrayRecord(model.state_dict())
+    if hasattr(model, '_module'):
+        clean_model = model._module
+    else:
+        clean_model = model
+
+    state_dict = clean_model.state_dict()
+
+    model_record = ArrayRecord(state_dict)
+
     metrics = {
-        "train_loss": train_loss,
-        "train_acc": train_acc,
+        "train_loss": float(train_loss),
+        "train_acc": float(train_acc),
         "num-examples": len(trainloader.dataset),
-        "dp_epsilon": epsilon,
-        "dp_alpha": best_alpha,
-        "noise_multiplier": noise_multiplier,
-        "global_sensitivity": global_sensitivity,
+        "dp_epsilon": float(epsilon),
+        "dp_alpha": float(best_alpha),
+        "noise_multiplier": float(noise_multiplier),
+        "global_sensitivity": float(global_sensitivity),
         "local_epochs_used": local_epochs,
         **dp_profile,
         **energy_metrics,
@@ -189,14 +203,24 @@ def evaluate(msg: Message, context: Context):
 
     dataset_name = context.run_config.get("dataset", "cifar10")
 
-    if dataset_name == "cifar10":
-        model = Net()
-    elif dataset_name == "femnist":
+    if dataset_name == "femnist":
         model = FEMNISTNet()
     else:
         model = Net()
 
-    model.load_state_dict(msg.content["arrays"].to_torch_state_dict())
+    try:
+        if "arrays" in msg.content:
+            received_state_dict = msg.content["arrays"].to_torch_state_dict()
+
+            if len(received_state_dict) == 0:
+                print("Warning: Received empty state_dict for evaluation")
+            else:
+                model.load_state_dict(received_state_dict, strict=True)
+        else:
+            print("Warning: No arrays in message for evaluation")
+    except Exception as e:
+        print(f"Error loading state_dict for evaluation: {e}")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -207,8 +231,8 @@ def evaluate(msg: Message, context: Context):
     eval_loss, eval_acc = test(model, valloader, device, img_key, label_key)
 
     metrics = {
-        "eval_loss": eval_loss,
-        "eval_acc": eval_acc,
+        "eval_loss": float(eval_loss),
+        "eval_acc": float(eval_acc),
         "num-examples": len(valloader.dataset),
     }
     metric_record = MetricRecord(metrics)
