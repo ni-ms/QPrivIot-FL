@@ -9,35 +9,21 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qpriviot-fl"
-version = "2.0.0"
-description = "Private federated aggregation of LLM-agent memory (SecAgg + Skellam DP)."
+version = "1.0.0"
+description = ""
 license = "Apache-2.0"
-# Active agent-memory paper deps. The former Flower FL app (which needed
-# flwr / flwr-datasets / opacus / torchvision / psutil) was archived to
-# scripts/archive/flower_app/ after the pivot; those deps were dropped here.
-# NOTE: torch is listed unpinned so an existing CUDA build (e.g. +cu124) is not
-# clobbered by a CPU wheel; install the CUDA build separately if needed.
+# Dependencies for your Flower App
 dependencies = [
+    "flwr[simulation]>=1.22.0",
+    "flwr-datasets[vision]>=0.5.0",
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+    "opacus",
+    "flwr-datasets",
+    "psutil",
+    "matplotlib",
     "numpy",
-    "torch",                 # qpriviot_fl/privacy_utils.py (SecAgg + Skellam crypto)
-    "scikit-learn",          # TF-IDF/SVD/PCA, roc_auc_score
-    "sentence-transformers", # all-MiniLM-L6-v2 real embeddings
-    "huggingface_hub",       # LongMemEval dataset download
-    "matplotlib",            # figure regeneration
-    "pyyaml",
-]
-
-[project.optional-dependencies]
-# LLM-distillation of turns -> notes runs against a local Ollama server.
-distill = [
-  "ollama",
-]
-dev = [
-  "pytest>=8",
-  "pytest-cov",
-  "pytest-xdist",
-  "ruff",
-  "black",
+    "pyyaml"
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -47,36 +33,16 @@ packages = ["."]
 publisher = "nikms"
 
 # Point to your ServerApp and ClientApp objects
-# NOTE: the Flower FL app was archived to scripts/archive/flower_app/ (project pivoted to
-# agent-memory). Restore those modules into qpriviot_fl/ and uncomment to `flwr run` again.
-# [tool.flwr.app.components]
-# serverapp = "qpriviot_fl.server_app:app"
-# clientapp = "qpriviot_fl.client_app:app"
+[tool.flwr.app.components]
+serverapp = "qpriviot_fl.server_app:app"
+clientapp = "qpriviot_fl.client_app:app"
 
 # Custom config values accessible via `context.run_config`
 [tool.flwr.app.config]
-num-server-rounds = 100
-fraction-fit = 1.0
-fraction-evaluate = 1.0
-min-fit-clients = 8
-min-available-clients = 8
-batch-size = 32
+num-server-rounds = 3
+fraction-train = 0.5
 local-epochs = 1
-learning-rate = 0.01
-dataset = "cifar10"
-num-shares = 3
-reconstruction-threshold = 2
-max-weight = 10000
-use-secagg = false
-use-dp = false
-use-adaptive-dp = false
-ablation-mode = ""
-secagg-dp-mode = ""
-target-epsilon = 12.0
-base-noise = 0.3
-seed = 1337
-dirichlet-alpha = 0.3
-num-clients = 10
+lr = 0.01
 
 # Default federation to use when running the app
 [tool.flwr.federations]
