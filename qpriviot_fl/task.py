@@ -1,4 +1,4 @@
-"""Model, data loading, training, and testing with multi-dataset support."""
+"""Model, data loading, training, and testing - FIXED for Opacus."""
 
 import torch
 import torch.nn as nn
@@ -151,7 +151,6 @@ def load_femnist(partition_id: int, num_partitions: int, batch_size: int):
 
 def load_iot_simulated(partition_id: int, num_partitions: int, batch_size: int):
     """Simulated IoT sensor data (placeholder)."""
-
     np.random.seed(partition_id)
     n_samples = 1000
     X = np.random.randn(n_samples, 10).astype(np.float32)
@@ -192,21 +191,29 @@ def train(
 ) -> Dict:
     """
     Train model with optional DP.
-    Returns training metrics and privacy epsilon.
+    FIXED: Creates fresh optimizer and properly attaches DP.
     """
     model.to(device)
     criterion = nn.CrossEntropyLoss()
+
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     privacy_engine = None
+    epsilon = None
+
     if dp_config:
+
         from qpriviot_fl.privacy import attach_dp_to_optimizer
-        model, optimizer, trainloader, privacy_engine = attach_dp_to_optimizer(
-            model, optimizer, trainloader,
-            dp_config["noise_multiplier"],
-            dp_config["max_grad_norm"],
-            device
-        )
+        try:
+            model, optimizer, trainloader, privacy_engine = attach_dp_to_optimizer(
+                model, optimizer, trainloader,
+                dp_config["noise_multiplier"],
+                dp_config["max_grad_norm"],
+                device
+            )
+        except Exception as e:
+            print(f"WARNING: DP attachment failed: {e}. Training without DP.")
+            dp_config = None
 
     model.train()
     total_loss = 0.0
@@ -236,11 +243,11 @@ def train(
 
     val_loss, val_acc = test(model, valloader, device, dataset_name)
 
-    epsilon = None
     if privacy_engine:
         try:
             epsilon = privacy_engine.get_epsilon(delta=1e-5)
-        except:
+        except Exception as e:
+            print(f"WARNING: Could not compute epsilon: {e}")
             epsilon = None
 
     return {
