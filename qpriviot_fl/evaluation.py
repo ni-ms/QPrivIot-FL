@@ -1,170 +1,80 @@
-"""QPrivIot-FL: Evaluation and visualization module."""
-import numpy as np
-import matplotlib
+"""Experiment evaluation script for paper results."""
 
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+import subprocess
+import json
 from pathlib import Path
 
 
-def load_metrics(dataset_name="cifar10"):
-    """Load training metrics from file."""
-    metrics_file = f"training_metrics_{dataset_name}.npz"
-    data = np.load(metrics_file)
-    return {key: data[key] for key in data.files}
+def run_experiment(dataset: str, num_rounds: int, num_clients: int, use_secagg: bool = True):
+    """Run a single FL experiment."""
 
+    print(f"\n{'=' * 80}")
+    print(f"Running experiment: {dataset}, {num_rounds} rounds, {num_clients} clients, SecAgg={use_secagg}")
+    print(f"{'=' * 80}\n")
 
-def plot_privacy_utility_tradeoff(metrics, output_dir="plots"):
-    """Plot privacy-utility tradeoff curves."""
-    Path(output_dir).mkdir(exist_ok=True)
+    cmd = [
+        "flower-simulation",
+        "--client-app", "qpriviot_fl.client:app",
+        "--server-app", "qpriviot_fl.server:app",
+        "--num-supernodes", str(num_clients),
+    ]
 
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
-
-    rounds = metrics["round"]
-
-    ax1.plot(rounds, metrics["avg_loss"], 'b-o', label='Training Loss')
-    ax1.set_xlabel('Round')
-    ax1.set_ylabel('Loss')
-    ax1.set_title('Training Loss Over Rounds')
-    ax1.grid(True, alpha=0.3)
-    ax1.legend()
-
-    ax2.plot(rounds, metrics["avg_accuracy"], 'g-o', label='Training Accuracy')
-    ax2.set_xlabel('Round')
-    ax2.set_ylabel('Accuracy')
-    ax2.set_title('Training Accuracy Over Rounds')
-    ax2.grid(True, alpha=0.3)
-    ax2.legend()
-
-    ax3_twin = ax3.twinx()
-    ax3.plot(rounds, metrics["privacy_budget"], 'r-o', label='Privacy Budget')
-    ax3_twin.plot(rounds, metrics["avg_epsilon"], 'purple', linestyle='--', marker='s', label='Epsilon Spent')
-    ax3.set_xlabel('Round')
-    ax3.set_ylabel('Privacy Budget', color='r')
-    ax3_twin.set_ylabel('Epsilon', color='purple')
-    ax3.set_title('Adaptive Privacy Budget Scheduling')
-    ax3.grid(True, alpha=0.3)
-    ax3.legend(loc='upper left')
-    ax3_twin.legend(loc='upper right')
-
-    ax4.plot(rounds, metrics["avg_energy"], 'orange', marker='D', label='Avg Energy Consumed')
-    ax4.set_xlabel('Round')
-    ax4.set_ylabel('Energy Consumed (%)')
-    ax4.set_title('Average Energy Consumption Per Round')
-    ax4.grid(True, alpha=0.3)
-    ax4.legend()
-
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/privacy_utility_analysis.png", dpi=300, bbox_inches='tight')
-    print(f"Saved plot to {output_dir}/privacy_utility_analysis.png")
-    plt.close()
-
-
-def plot_epsilon_accuracy_tradeoff(metrics, output_dir="plots"):
-    """Plot epsilon vs accuracy tradeoff."""
-    Path(output_dir).mkdir(exist_ok=True)
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(metrics["avg_epsilon"], metrics["avg_accuracy"], 'bo-', markersize=8)
-
-    for i, round_num in enumerate(metrics["round"]):
-        if i % 2 == 0:
-            plt.annotate(f'R{round_num}',
-                         (metrics["avg_epsilon"][i], metrics["avg_accuracy"][i]),
-                         textcoords="offset points", xytext=(5, 5), ha='left')
-
-    plt.xlabel('Privacy Cost (Epsilon)')
-    plt.ylabel('Model Accuracy')
-    plt.title('Privacy-Utility Tradeoff: Epsilon vs Accuracy')
-    plt.grid(True, alpha=0.3)
-    plt.savefig(f"{output_dir}/epsilon_accuracy_tradeoff.png", dpi=300, bbox_inches='tight')
-    print(f"Saved plot to {output_dir}/epsilon_accuracy_tradeoff.png")
-    plt.close()
-
-
-def generate_comparison_table(metrics):
-    """Generate comparison table for paper."""
-    final_round = -1
-
-    table_data = {
-        "Metric": [
-            "Final Accuracy",
-            "Final Loss",
-            "Total Privacy Spent (ε)",
-            "Initial Privacy Budget",
-            "Final Privacy Budget",
-            "Avg Energy per Round (%)",
-            "Total Rounds",
-        ],
-        "Value": [
-            f"{metrics['avg_accuracy'][final_round]:.4f}",
-            f"{metrics['avg_loss'][final_round]:.4f}",
-            f"{metrics['avg_epsilon'][final_round]:.4f}",
-            f"{metrics['privacy_budget'][0]:.4f}",
-            f"{metrics['privacy_budget'][final_round]:.4f}",
-            f"{np.mean(metrics['avg_energy']):.4f}",
-            f"{len(metrics['round'])}",
-        ]
+    run_config = {
+        "num-server-rounds": num_rounds,
+        "dataset": dataset,
+        "batch-size": 32,
+        "local-epochs": 2,
+        "learning-rate": 0.001,
+        "fraction-fit": 0.8,
+        "fraction-evaluate": 0.5,
+        "min-fit-clients": 3,
+        "min-available-clients": 3,
+        "use-secagg": use_secagg,
+        "num-shares": 3,
+        "reconstruction-threshold": 2,
+        "max-weight": 1000,
     }
 
-    print("\n" + "=" * 50)
-    print("EVALUATION SUMMARY TABLE")
-    print("=" * 50)
-    for metric, value in zip(table_data["Metric"], table_data["Value"]):
-        print(f"{metric:.<40} {value}")
-    print("=" * 50 + "\n")
+    config_str = json.dumps(run_config)
+    cmd.extend(["--run-config", config_str])
 
-    return table_data
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        print(f"✅ Experiment completed successfully!")
+    else:
+        print(f"❌ Experiment failed:")
+        print(result.stderr)
+
+    return result.returncode == 0
 
 
-def compare_baseline_vs_adaptive(adaptive_metrics, baseline_metrics=None):
-    """Compare adaptive approach vs baseline uniform DP."""
-    if baseline_metrics is None:
-        print("\nNote: Baseline metrics not provided. Run baseline experiment for comparison.")
-        return
+def run_all_experiments():
+    """Run full experimental suite for paper."""
 
-    print("\n" + "=" * 60)
-    print("ADAPTIVE VS BASELINE COMPARISON")
-    print("=" * 60)
+    experiments = [
+        {"dataset": "cifar10", "num_rounds": 20, "num_clients": 10, "use_secagg": True},
+        {"dataset": "cifar10", "num_rounds": 20, "num_clients": 10, "use_secagg": False},
+        {"dataset": "femnist", "num_rounds": 15, "num_clients": 20, "use_secagg": True},
+        {"dataset": "iot", "num_rounds": 10, "num_clients": 5, "use_secagg": True},
+    ]
 
-    comparison = {
-        "Metric": ["Final Accuracy", "Final Epsilon", "Avg Energy"],
-        "Baseline": [
-            f"{baseline_metrics['avg_accuracy'][-1]:.4f}",
-            f"{baseline_metrics['avg_epsilon'][-1]:.4f}",
-            f"{np.mean(baseline_metrics['avg_energy']):.4f}",
-        ],
-        "Adaptive": [
-            f"{adaptive_metrics['avg_accuracy'][-1]:.4f}",
-            f"{adaptive_metrics['avg_epsilon'][-1]:.4f}",
-            f"{np.mean(adaptive_metrics['avg_energy']):.4f}",
-        ],
-        "Improvement": [
-            f"{(adaptive_metrics['avg_accuracy'][-1] - baseline_metrics['avg_accuracy'][-1]) * 100:.2f}%",
-            f"{(baseline_metrics['avg_epsilon'][-1] - adaptive_metrics['avg_epsilon'][-1]):.4f}",
-            f"{(baseline_metrics['avg_energy'].mean() - adaptive_metrics['avg_energy'].mean()):.2f}%",
-        ]
-    }
+    results = []
 
-    for i, metric in enumerate(comparison["Metric"]):
-        print(f"{metric}:")
-        print(f"  Baseline:   {comparison['Baseline'][i]}")
-        print(f"  Adaptive:   {comparison['Adaptive'][i]}")
-        print(f"  Improvement: {comparison['Improvement'][i]}")
-        print()
+    for exp in experiments:
+        success = run_experiment(**exp)
+        results.append({**exp, "success": success})
+
+    print(f"\n{'=' * 80}")
+    print("EXPERIMENT SUMMARY")
+    print(f"{'=' * 80}")
+
+    for i, (exp, res) in enumerate(zip(experiments, results), 1):
+        status = "✅ SUCCESS" if res["success"] else "❌ FAILED"
+        print(f"{i}. {exp['dataset']} ({exp['num_rounds']} rounds, SecAgg={exp['use_secagg']}): {status}")
+
+    print(f"\n{'=' * 80}")
 
 
 if __name__ == "__main__":
-    dataset = "cifar10"
-
-    print(f"Loading metrics for {dataset}...")
-    metrics = load_metrics(dataset)
-
-    print("Generating evaluation plots...")
-    plot_privacy_utility_tradeoff(metrics)
-    plot_epsilon_accuracy_tradeoff(metrics)
-
-    print("Generating summary table...")
-    generate_comparison_table(metrics)
-
-    print("\nEvaluation complete!")
+    run_all_experiments()
