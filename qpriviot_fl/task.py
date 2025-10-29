@@ -1,4 +1,4 @@
-"""Model, data loading, training, and testing - FIXED for Opacus."""
+"""Model, data loading, training, and testing - FINAL REVIEWED VERSION."""
 
 import torch
 import torch.nn as nn
@@ -67,7 +67,7 @@ class IoTSensorNet(nn.Module):
         return self.fc3(x)
 
 
-def make_model(dataset_name: str = "cifar10"):
+def make_model(dataset_name: str = "cifar10") -> nn.Module:
     """Factory function to create appropriate model for dataset."""
     if dataset_name == "cifar10":
         return Net()
@@ -85,10 +85,7 @@ def load_data(
         batch_size: int = 32,
         dataset_name: str = "cifar10"
 ) -> Tuple[DataLoader, DataLoader]:
-    """
-    Load partitioned data for FL.
-    Supports: cifar10, femnist, iot (simulated)
-    """
+    """Load partitioned data for FL."""
     if dataset_name == "cifar10":
         return load_cifar10(partition_id, num_partitions, batch_size)
     elif dataset_name == "femnist":
@@ -145,7 +142,7 @@ def load_femnist(partition_id: int, num_partitions: int, batch_size: int):
 
         return trainloader, testloader
     except Exception as e:
-        print(f"FEMNIST loading failed: {e}. Using CIFAR-10 as fallback.")
+        print(f"⚠️ FEMNIST loading failed: {e}. Using CIFAR-10 as fallback.")
         return load_cifar10(partition_id, num_partitions, batch_size)
 
 
@@ -191,28 +188,47 @@ def train(
 ) -> Dict:
     """
     Train model with optional DP.
-    FIXED: Creates fresh optimizer and properly attaches DP.
+    
+    Args:
+        model: PyTorch model
+        trainloader: Training data loader
+        valloader: Validation data loader
+        epochs: Number of local epochs
+        learning_rate: Learning rate
+        device: Device (CPU/GPU)
+        dp_config: DP configuration (None for no DP)
+        dataset_name: Dataset name for data extraction
+    
+    Returns:
+        Dictionary with training results
     """
     model.to(device)
     criterion = nn.CrossEntropyLoss()
-
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     privacy_engine = None
-    epsilon = None
+    epsilon = 0.0
+    dp_attached = False
 
     if dp_config:
-
         from qpriviot_fl.privacy import attach_dp_to_optimizer
         try:
+            print(f"🔧 Attaching DP: noise={dp_config['noise_multiplier']:.2f}, "
+                  f"clip={dp_config['max_grad_norm']:.2f}")
+
             model, optimizer, trainloader, privacy_engine = attach_dp_to_optimizer(
                 model, optimizer, trainloader,
                 dp_config["noise_multiplier"],
                 dp_config["max_grad_norm"],
                 device
             )
+            dp_attached = True
+            print("✅ DP attached successfully")
+
         except Exception as e:
-            print(f"WARNING: DP attachment failed: {e}. Training without DP.")
+            print(f"❌ DP attachment failed: {e}")
+            import traceback
+            traceback.print_exc()
             dp_config = None
 
     model.train()
@@ -220,7 +236,9 @@ def train(
 
     for epoch in range(epochs):
         epoch_loss = 0.0
-        for batch in trainloader:
+
+        for batch_idx, batch in enumerate(trainloader):
+
             if dataset_name == "iot":
                 images, labels = batch
             else:
@@ -237,24 +255,31 @@ def train(
 
             epoch_loss += loss.item()
 
-        total_loss += epoch_loss / len(trainloader)
+        avg_epoch_loss = epoch_loss / len(trainloader)
+        total_loss += avg_epoch_loss
+        print(f"  Epoch {epoch + 1}/{epochs}: loss={avg_epoch_loss:.4f}")
 
     avg_train_loss = total_loss / epochs
 
     val_loss, val_acc = test(model, valloader, device, dataset_name)
 
-    if privacy_engine:
+    if privacy_engine and dp_attached:
         try:
             epsilon = privacy_engine.get_epsilon(delta=1e-5)
+            print(f"✅ Privacy spent: ε={epsilon:.2f} (δ=1e-5)")
         except Exception as e:
-            print(f"WARNING: Could not compute epsilon: {e}")
-            epsilon = None
+            print(f"⚠️ Could not compute epsilon: {e}")
+            epsilon = 0.0
+
+    print(f"📊 Results: train_loss={avg_train_loss:.4f}, val_loss={val_loss:.4f}, "
+          f"val_acc={val_acc:.2%}, ε={epsilon:.2f}")
 
     return {
-        "train_loss": avg_train_loss,
-        "val_loss": val_loss,
-        "val_accuracy": val_acc,
-        "epsilon": epsilon,
+        "train_loss": float(avg_train_loss),
+        "val_loss": float(val_loss),
+        "val_accuracy": float(val_acc),
+        "epsilon": float(epsilon),
+        "dp_attached": dp_attached,
     }
 
 
@@ -264,7 +289,7 @@ def test(
         device: torch.device,
         dataset_name: str = "cifar10"
 ) -> Tuple[float, float]:
-    """Evaluate model."""
+    """Evaluate model on test set."""
     model.to(device)
     model.eval()
     criterion = nn.CrossEntropyLoss()
@@ -274,6 +299,7 @@ def test(
 
     with torch.no_grad():
         for batch in testloader:
+
             if dataset_name == "iot":
                 images, labels = batch
             else:
@@ -281,6 +307,7 @@ def test(
                 labels = batch["label"]
 
             images, labels = images.to(device), labels.to(device)
+
             outputs = model(images)
             loss = criterion(outputs, labels)
 
@@ -299,13 +326,18 @@ class ConvergenceTracker:
     """Track training convergence for adaptive privacy scheduling."""
 
     def __init__(self, window_size: int = 5, threshold: float = 0.01):
+        """
+        Args:
+            window_size: Number of recent losses to consider
+            threshold: Loss change threshold for convergence
+        """
         self.window_size = window_size
         self.threshold = threshold
         self.loss_history = []
 
     def update(self, loss: float):
         """Add new loss value."""
-        self.loss_history.append(loss)
+        self.loss_history.append(float(loss))
         if len(self.loss_history) > self.window_size:
             self.loss_history.pop(0)
 
@@ -318,7 +350,6 @@ class ConvergenceTracker:
             return 0.0
 
         recent_losses = self.loss_history[-self.window_size:]
-        loss_std = np.std(recent_losses)
         loss_change = abs(recent_losses[-1] - recent_losses[0])
 
         convergence = 1.0 - min(1.0, loss_change / self.threshold)
