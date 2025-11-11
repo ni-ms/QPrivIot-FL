@@ -52,6 +52,10 @@ use-secagg = true
 num-shares = 3
 reconstruction-threshold = 2
 max-weight = 10000
+use-dp = true
+use-adaptive-dp = true
+target-epsilon = 10.0
+base-noise = 1.7
 
 # Default federation to use when running the app
 [tool.flwr.federations]

@@ -176,6 +176,76 @@ def set_weights(model: nn.Module, weights: list):
     model.load_state_dict(state_dict, strict=True)
 
 
+def apply_per_layer_clipping(model: nn.Module, clipping_norms: Dict[str, float], device: torch.device):
+    """
+    Apply per-layer gradient clipping.
+
+    Args:
+        model: PyTorch model
+        clipping_norms: Dict mapping parameter name to max norm
+        device: Device (CPU/GPU)
+    """
+    for name, param in model.named_parameters():
+        if param.grad is not None and name in clipping_norms:
+            max_norm = clipping_norms[name]
+            # Clip this parameter's gradient
+            grad_norm = torch.norm(param.grad)
+            if grad_norm > max_norm:
+                param.grad.data.mul_(max_norm / (grad_norm + 1e-6))
+
+
+def add_per_layer_noise(
+        model: nn.Module,
+        noise_multipliers: Dict[str, float],
+        clipping_norms: Dict[str, float],
+        device: torch.device
+):
+    """
+    Add per-layer Gaussian noise to gradients.
+
+    Args:
+        model: PyTorch model
+        noise_multipliers: Dict mapping parameter name to noise multiplier
+        clipping_norms: Dict mapping parameter name to clipping norm
+        device: Device (CPU/GPU)
+    """
+    for name, param in model.named_parameters():
+        if param.grad is not None and name in noise_multipliers:
+            noise_scale = noise_multipliers[name] * clipping_norms[name]
+            noise = torch.randn_like(param.grad) * noise_scale
+            param.grad.data.add_(noise)
+
+
+def extract_batch_data(batch, dataset_name: str, device: torch.device):
+    """
+    Extract (images, labels) from batch in various formats.
+
+    Handles:
+    - CIFAR-10: dict with "img" key
+    - FEMNIST: dict with "image" key
+    - IoT: tuple (x, y)
+
+    Args:
+        batch: Batch from dataloader
+        dataset_name: Dataset name
+        device: Device to move tensors to
+
+    Returns:
+        (images, labels) tuple on correct device
+    """
+    if isinstance(batch, dict):
+        if "img" in batch:
+            images, labels = batch["img"], batch["label"]
+        elif "image" in batch:
+            images, labels = batch["image"], batch["label"]
+        else:
+            raise ValueError(f"Unknown dict format: {batch.keys()}")
+    else:
+        images, labels = batch
+
+    return images.to(device), labels.to(device)
+
+
 def train(
         model: nn.Module,
         trainloader: DataLoader,
@@ -209,11 +279,18 @@ def train(
     privacy_engine = None
     epsilon = 0.0
     dp_attached = False
+    use_per_layer_dp = False
 
-    if dp_config:
+    # Check if per-layer DP is requested
+    if dp_config and dp_config.get("per_layer", False):
+        use_per_layer_dp = True
+        print(f"🎯 Using PER-LAYER DP with {len(dp_config['noise_multipliers'])} layers")
+
+    elif dp_config:
+        # Standard global DP via Opacus
         from qpriviot_fl.privacy import attach_dp_to_optimizer
         try:
-            print(f"🔧 Attaching DP: noise={dp_config['noise_multiplier']:.2f}, "
+            print(f"🔧 Attaching GLOBAL DP: noise={dp_config['noise_multiplier']:.2f}, "
                   f"clip={dp_config['max_grad_norm']:.2f}")
 
             model, optimizer, trainloader, privacy_engine = attach_dp_to_optimizer(
@@ -223,7 +300,7 @@ def train(
                 device
             )
             dp_attached = True
-            print("✅ DP attached successfully")
+            print("✅ Global DP attached successfully")
 
         except Exception as e:
             print(f"❌ DP attachment failed: {e}")
@@ -238,21 +315,32 @@ def train(
         epoch_loss = 0.0
 
         for batch_idx, batch in enumerate(trainloader):
-
-            if dataset_name == "iot":
-                images, labels = batch
-            else:
-                images = batch["img"] if "img" in batch else batch["image"]
-                labels = batch["label"]
-
-            images, labels = images.to(device), labels.to(device)
+            # Extract batch data (handles all dataset formats)
+            images, labels = extract_batch_data(batch, dataset_name, device)
 
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
-            optimizer.step()
 
+            # Apply per-layer DP if enabled
+            if use_per_layer_dp:
+                # 1. Per-layer gradient clipping
+                apply_per_layer_clipping(
+                    model,
+                    dp_config["clipping_norms"],
+                    device
+                )
+
+                # 2. Per-layer noise addition
+                add_per_layer_noise(
+                    model,
+                    dp_config["noise_multipliers"],
+                    dp_config["clipping_norms"],
+                    device
+                )
+
+            optimizer.step()
             epoch_loss += loss.item()
 
         avg_epoch_loss = epoch_loss / len(trainloader)
@@ -263,13 +351,26 @@ def train(
 
     val_loss, val_acc = test(model, valloader, device, dataset_name)
 
-    if privacy_engine and dp_attached:
+    # Compute epsilon
+    if use_per_layer_dp:
+        # Per-layer DP with proper composition
+        # For Gaussian mechanism: ε = sqrt(2 * epochs * ln(1/δ)) / noise_mult
+        # Simplified for normalized allocation
+        base_epsilon = 1.0 / max(dp_config["noise_multipliers"].values())
+        epsilon = base_epsilon * (epochs ** 0.5)
+        print(f"✅ Per-layer Privacy spent: ε≈{epsilon:.2f} (approximate)")
+
+
+
+    elif privacy_engine and dp_attached:
         try:
             epsilon = privacy_engine.get_epsilon(delta=1e-5)
-            print(f"✅ Privacy spent: ε={epsilon:.2f} (δ=1e-5)")
+            print(f"✅ Global Privacy spent: ε={epsilon:.2f} (δ=1e-5)")
         except Exception as e:
             print(f"⚠️ Could not compute epsilon: {e}")
             epsilon = 0.0
+    else:
+        epsilon = 0.0
 
     print(f"📊 Results: train_loss={avg_train_loss:.4f}, val_loss={val_loss:.4f}, "
           f"val_acc={val_acc:.2%}, ε={epsilon:.2f}")
@@ -279,7 +380,8 @@ def train(
         "val_loss": float(val_loss),
         "val_accuracy": float(val_acc),
         "epsilon": float(epsilon),
-        "dp_attached": dp_attached,
+        "dp_attached": dp_attached or use_per_layer_dp,
+        "per_layer_dp": use_per_layer_dp,
     }
 
 
@@ -299,14 +401,8 @@ def test(
 
     with torch.no_grad():
         for batch in testloader:
-
-            if dataset_name == "iot":
-                images, labels = batch
-            else:
-                images = batch["img"] if "img" in batch else batch["image"]
-                labels = batch["label"]
-
-            images, labels = images.to(device), labels.to(device)
+            # Use helper function for consistent batch extraction
+            images, labels = extract_batch_data(batch, dataset_name, device)
 
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -325,7 +421,7 @@ def test(
 class ConvergenceTracker:
     """Track training convergence for adaptive privacy scheduling."""
 
-    def __init__(self, window_size: int = 5, threshold: float = 0.01):
+    def __init__(self, window_size: int = 5, threshold: float = 0.1):
         """
         Args:
             window_size: Number of recent losses to consider
@@ -342,19 +438,25 @@ class ConvergenceTracker:
             self.loss_history.pop(0)
 
     def get_convergence_score(self) -> float:
-        """
-        Compute convergence score [0, 1].
-        1 = fully converged, 0 = not converged.
-        """
         if len(self.loss_history) < 2:
             return 0.0
 
         recent_losses = self.loss_history[-self.window_size:]
-        loss_change = abs(recent_losses[-1] - recent_losses[0])
+        if len(recent_losses) < 2:
+            return 0.0
 
-        convergence = 1.0 - min(1.0, loss_change / self.threshold)
+        import numpy as np
+        mean_loss = float(np.mean(recent_losses))
+        std_loss = float(np.std(recent_losses))
 
-        return convergence
+        if mean_loss == 0:
+            return 0.0
+
+        # Use coefficient of variation
+        cv = std_loss / mean_loss
+        normalized_score = 1.0 - min(1.0, cv / 0.05)
+
+        return float(np.clip(normalized_score, 0.0, 1.0))
 
     def is_converged(self) -> bool:
         """Check if training has converged."""

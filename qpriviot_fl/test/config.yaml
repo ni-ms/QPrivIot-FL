@@ -38,3 +38,6 @@ min_bandwidth: 5.0
 # Convergence
 convergence_window: 5
 convergence_threshold: 0.01
+
+use-dp: true
+use-adaptive-dp: true
