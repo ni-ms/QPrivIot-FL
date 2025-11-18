@@ -8,14 +8,13 @@ from typing import Dict, Optional, Tuple, List
 
 NOISE_CALL_COUNT = 0
 
-
 def generate_dp_noise(shape: Tuple[int, ...], stddev: float, device: torch.device) -> torch.Tensor:
     """YOUR CUSTOM NOISE FUNCTION."""
     global NOISE_CALL_COUNT
     NOISE_CALL_COUNT += 1
 
     if NOISE_CALL_COUNT % 10 == 1 or NOISE_CALL_COUNT <= 5:
-        print(f"🎲 CUSTOM NOISE #{NOISE_CALL_COUNT}: shape={tuple(shape)}, stddev={stddev:.4f}")
+        print(f" CUSTOM NOISE #{NOISE_CALL_COUNT}: shape={tuple(shape)}, stddev={stddev:.4f}")
 
     return torch.randn(shape, device=device) * stddev
 
@@ -60,7 +59,7 @@ def attach_dp_to_optimizer(
     global NOISE_CALL_COUNT
     NOISE_CALL_COUNT = 0
 
-    print(f"🔧 Preparing model for DP...")
+    print(f" Preparing model for DP...")
 
     model = prepare_model_for_dp(model)
     model = GradSampleModule(model)
@@ -69,7 +68,7 @@ def attach_dp_to_optimizer(
     lr = optimizer.param_groups[0]['lr']
     base_optimizer = optimizer_class(model.parameters(), lr=lr)
 
-    print(f"🔒 Creating CustomDPOptimizer")
+    print(f" Creating CustomDPOptimizer")
     print(f"   noise={noise_multiplier:.2f}, clip={max_grad_norm:.2f}")
 
     batch_size = getattr(dataloader, 'batch_size', 32)
@@ -91,10 +90,10 @@ def attach_dp_to_optimizer(
             sample_rate=sample_rate,
             noise_multiplier=noise_multiplier,
         )
-        print(f"✅ CUSTOM DP ATTACHED - generate_dp_noise() will be called!")
+        print(f" CUSTOM DP ATTACHED - generate_dp_noise() will be called!")
     except AttributeError:
 
-        print(f"⚠️ Using alternative accountant attachment")
+        print(f" Using alternative accountant attachment")
         privacy_engine.accountant = privacy_engine.accountant
         privacy_engine.accountant.history.append((noise_multiplier, sample_rate, len(dataloader)))
 
