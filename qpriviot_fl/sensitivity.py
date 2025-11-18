@@ -1,221 +1,103 @@
 """
-Signal sensitivity analysis for adaptive privacy - IMPROVED VERSION.
+Per-Layer Sensitivity Analysis for Adaptive Differential Privacy.
 
-KEY IMPROVEMENTS:
-1. Gradient-based sensitivity (not weight-based)
-2. Multi-batch sampling for robustness
-3. Layer classification (input/hidden/output)
-4. Normalized noise allocation (respects epsilon budget)
-5. Proper DP integration
-6. Comprehensive documentation
-7. Validation utilities
+[1] Dwork & Roth (2014). "The Algorithmic Foundations of Differential Privacy"
+    Foundations and Trends in TCS, 9(3-4), 211-407. doi:10.1561/0400000042
+[2] Abadi et al. (2016). "Deep Learning with Differential Privacy"
+    ACM CCS. doi:10.1145/2976749.2978318
+[3] Mironov (2017). "Rényi Differential Privacy"
+    IEEE CSF. doi:10.1109/CSF.2017.11
+[4] Li et al. (2020). "Multi-site fMRI Analysis Using Privacy-preserving FL"
+    Medical Image Analysis, 65, 101765. doi:10.1016/j.media.2020.101765
 """
 
+import logging
+import math
+from collections import defaultdict
+from typing import Dict, List, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
-from typing import Dict, List, Tuple, Optional
-from collections import defaultdict
-import numpy as np
-import logging
 
 logger = logging.getLogger(__name__)
 
 
-class LayerClassifier:
-    """Classify layers by type and role in the model."""
-
-    @staticmethod
-    def classify_layers(model: nn.Module) -> Dict[str, List[str]]:
-        """
-        Classify model layers by type.
-
-        Returns:
-            dict with keys: 'conv', 'embedding', 'hidden', 'output', 'batch_norm'
-            values: list of layer names in that category
-        """
-        classification = defaultdict(list)
-
-        layer_names = [name for name, _ in model.named_modules()]
-
-        for name, module in model.named_modules():
-            if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-                classification['conv'].append(name)
-            elif isinstance(module, nn.Embedding):
-                classification['embedding'].append(name)
-            elif isinstance(module, nn.Linear):
-                # Last linear layer = output
-                if name.endswith('fc') or name.endswith('output') or name.endswith('classification'):
-                    classification['output'].append(name)
-                else:
-                    classification['hidden'].append(name)
-            elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                classification['batch_norm'].append(name)
-
-        return dict(classification)
-
-    @staticmethod
-    def get_layer_type(layer_name: str, classification: Dict[str, List[str]]) -> str:
-        """Get the type of a specific layer."""
-        # Handle parameter names like "conv1.weight" or "fc3.bias"
-        # Extract base layer name (before the dot)
-        base_name = layer_name.split('.')[0] if '.' in layer_name else layer_name
-
-        for layer_type, layer_names in classification.items():
-            # Check if base name is in the classified layers
-            if base_name in layer_names or layer_name in layer_names:
-                return layer_type
-
-        # Fallback: classify by common patterns
-        if 'conv' in layer_name:
-            return 'conv'
-        elif 'fc' in layer_name:
-            if 'fc3' in layer_name or 'fc_out' in layer_name:
-                return 'output'
-            return 'hidden'
-        elif 'linear' in layer_name.lower():
-            return 'hidden'
-
-        return 'unknown'
-
-
-class SensitivityAnalyzer:
-    """
-    Analyze and track parameter sensitivity for signal-aware privacy allocation.
-
-    METHODOLOGY:
-    ============
-    Sensitivity represents how much a parameter's gradient changes during training.
-
-    - High sensitivity (σ > 0.7): Parameters that learn rapidly
-      → Require stronger privacy protection (higher noise)
-      → Example: Classification layer parameters
-
-    - Low sensitivity (σ < 0.3): Parameters that learn slowly/stably
-      → Can use less noise to preserve utility
-      → Example: Early convolutional layers
-
-    GRADIENT SAMPLING:
-    ==================
-    We compute sensitivity from gradient flows, not initial weights:
-
-    1. Forward pass on multiple batches
-    2. Compute gradients for each batch
-    3. Track gradient variance across batches
-    4. Use exponential moving average (EMA) for smoothing
-    """
-
-    def __init__(self, model: nn.Module, ema_alpha: float = 0.1):
-        """
-        Initialize sensitivity analyzer.
-
-        Args:
-            model: PyTorch model to analyze
-            ema_alpha: EMA smoothing factor (0-1). Higher = more recent data weighted
-        """
+class GradientSensitivityAnalyzer:
+    def __init__(self, model: nn.Module):
         self.model = model
-        self.ema_alpha = ema_alpha
-        self.sensitivity_history = defaultdict(lambda: [])
-        self.ema_sensitivity = {}
-        self.classifier = LayerClassifier()
-        self.layer_classification = self.classifier.classify_layers(model)
+        self.sensitivity_cache = {}
 
-    def compute_batch_gradient_sensitivity(
-            self,
-            batch
+    def compute_per_sample_gradient_variance(
+        self,
+        batch: Tuple[torch.Tensor, torch.Tensor],
+        criterion: nn.Module = None
     ) -> Dict[str, float]:
-        """
-        Compute gradient sensitivity for a single batch.
+        if criterion is None:
+            criterion = nn.CrossEntropyLoss()
 
-        Args:
-            batch: Either dict {"img": tensor, "label": tensor} or tuple (x, y)
-
-        Returns:
-            Dictionary mapping parameter name to gradient magnitude
-        """
-        # Handle different batch formats
         if isinstance(batch, dict):
-            if "img" in batch:
-                x, y = batch["img"], batch["label"]
-            elif "image" in batch:
-                x, y = batch["image"], batch["label"]
-            else:
-                raise ValueError(f"Unknown dict format with keys: {batch.keys()}")
+            x, y = batch["img"], batch["label"]
         else:
             x, y = batch
 
-        # Move to correct device
         device = next(self.model.parameters()).device
         x, y = x.to(device), y.to(device)
 
-        self.model.zero_grad()
+        batch_size = x.size(0)
+        if batch_size < 2:
+            return {name: 0.0 for name, _ in self.model.named_parameters()}
 
-        # Forward pass
-        output = self.model(x)
-        loss = nn.CrossEntropyLoss()(output, y)
+        per_sample_grads = defaultdict(list)
 
-        # Backward pass
-        loss.backward()
+        for i in range(batch_size):
+            self.model.zero_grad()
+            xi, yi = x[i:i+1], y[i:i+1]
+            output = self.model(xi)
+            loss = criterion(output, yi)
+            loss.backward()
 
-        # Compute gradient magnitudes (sensitivity = norm of gradient)
-        grad_sensitivity = {}
-        for name, param in self.model.named_parameters():
-            if param.grad is not None:
-                grad_norm = torch.norm(param.grad).item()
-                grad_sensitivity[name] = grad_norm
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    per_sample_grads[name].append(param.grad.detach().clone())
+
+        sensitivities = {}
+        for name, grads in per_sample_grads.items():
+            if len(grads) > 1:
+                stacked_grads = torch.stack(grads)
+                norms = torch.norm(stacked_grads.view(stacked_grads.size(0), -1), dim=1)
+                sensitivities[name] = torch.std(norms).item()
             else:
-                grad_sensitivity[name] = 0.0
+                sensitivities[name] = 0.0
 
-        return grad_sensitivity
+        return sensitivities
 
-    def sample_sensitivities(
-            self,
-            dataloader,
-            num_batches: int = 5
+    def sample_sensitivity_multi_batch(
+        self,
+        dataloader,
+        num_batches: int = 5,
+        criterion: nn.Module = None
     ) -> Dict[str, float]:
-        """
-        Sample gradient sensitivities over multiple batches.
-
-        This provides robust sensitivity estimates by averaging over
-        multiple data samples rather than single batch.
-
-        Args:
-            dataloader: Training data loader
-            num_batches: Number of batches to sample
-
-        Returns:
-            Average gradient sensitivity per parameter
-        """
         all_sensitivities = defaultdict(list)
 
         for batch_idx, batch in enumerate(dataloader):
             if batch_idx >= num_batches:
                 break
 
-            grad_sens = self.compute_batch_gradient_sensitivity(batch)
-
-            for name, sens in grad_sens.items():
+            batch_sens = self.compute_per_sample_gradient_variance(batch, criterion)
+            for name, sens in batch_sens.items():
                 all_sensitivities[name].append(sens)
 
-        # Average sensitivity across samples
         avg_sensitivities = {}
-        for name, sensitivities in all_sensitivities.items():
-            avg_sensitivities[name] = np.mean(sensitivities) if sensitivities else 0.0
+        for name, sens_list in all_sensitivities.items():
+            avg_sensitivities[name] = np.mean(sens_list) if sens_list else 0.0
 
         return avg_sensitivities
 
     def normalize_sensitivities(
-            self,
-            sensitivities: Dict[str, float]
+        self,
+        sensitivities: Dict[str, float]
     ) -> Dict[str, float]:
-        """
-        Normalize sensitivities to [0, 1] range.
-
-        Args:
-            sensitivities: Raw sensitivity values
-
-        Returns:
-            Normalized sensitivities in [0, 1]
-        """
         if not sensitivities:
             return {}
 
@@ -236,393 +118,155 @@ class SensitivityAnalyzer:
 
         return normalized
 
-    def update_ema_sensitivity(
-            self,
-            new_sensitivities: Dict[str, float]
-    ) -> Dict[str, float]:
-        """
-        Update exponential moving average of sensitivities.
 
-        Smooths out noise in gradient-based estimates by maintaining
-        running average with exponential decay.
-
-        Args:
-            new_sensitivities: New sensitivity measurements
-
-        Returns:
-            Updated EMA sensitivities
-        """
-        for name, new_sens in new_sensitivities.items():
-            if name not in self.ema_sensitivity:
-                self.ema_sensitivity[name] = new_sens
-            else:
-                old_ema = self.ema_sensitivity[name]
-                self.ema_sensitivity[name] = (
-                        (1 - self.ema_alpha) * old_ema +
-                        self.ema_alpha * new_sens
-                )
-
-        return self.ema_sensitivity.copy()
-
-
-class NoiseAllocator:
-    """
-    Allocate per-layer noise based on sensitivity while respecting
-    total epsilon budget.
-
-    PRINCIPLE:
-    ==========
-    High sensitivity layer → More privacy needed → Higher noise multiplier
-    Low sensitivity layer → Less privacy needed → Lower noise multiplier
-
-    CONSTRAINT:
-    ===========
-    Total privacy budget across all layers must equal target epsilon:
-
-        Σ_i (n_samples_i / noise_multiplier_i) = target_epsilon
-
-    Or equivalently (simplified):
-        Σ_i noise_multiplier_i ≈ normalized sum
-    """
-
+class AdaptiveNoiseAllocator:
     @staticmethod
-    def allocate_noise_inversely_proportional(
-            sensitivities: Dict[str, float],
-            target_noise: float = 1.0,
-            alpha: float = 1.0
+    def allocate_noise_proportional_to_sensitivity(
+        sensitivities: Dict[str, float],
+        target_epsilon: float,
+        delta: float = 1e-5,
+        clip_norm: float = 1.0
     ) -> Dict[str, float]:
         """
-        Allocate noise inversely proportional to sensitivity.
+        Gaussian mechanism [1,2]: ε = C·√(2·ln(1.25/δ)) / σ
+        where C = clip_norm (max gradient norm)
 
-        Formula:
-            noise_i = target_noise / (sensitivity_i + alpha)
-
-        where alpha prevents division by very small sensitivities
-
-        Args:
-            sensitivities: Normalized sensitivities in [0, 1]
-            target_noise: Base noise multiplier
-            alpha: Regularization factor (avoids extreme values)
-
-        Returns:
-            Per-layer noise multipliers
+        For adaptive allocation:
+        σ_i = sensitivity_i · C · √(2·ln(1.25/δ)) · N / ε_total
         """
-        noise_multipliers = {}
+        privacy_constant = math.sqrt(2 * math.log(1.25 / delta))
+        num_layers = len(sensitivities)
 
+        total_weighted_sens = sum(sensitivities.values())
+        if total_weighted_sens == 0:
+            return {name: clip_norm for name in sensitivities}
+
+        noise_multipliers = {}
         for name, sens in sensitivities.items():
-            # Inverse relationship: high sens → high noise
-            noise = target_noise / (sens + alpha)
-            noise_multipliers[name] = np.clip(noise, 0.5, 3.0)  # Bound for stability
+            weight = sens / total_weighted_sens
+            sigma = weight * clip_norm * privacy_constant * num_layers / target_epsilon
+            noise_multipliers[name] = max(sigma, 0.1)
 
         return noise_multipliers
 
     @staticmethod
-    def allocate_noise_normalized(
-            sensitivities: Dict[str, float],
-            target_epsilon: float = 1.0
+    def allocate_noise_simple_proportional(
+        sensitivities: Dict[str, float],
+        base_noise: float = 1.0
     ) -> Dict[str, float]:
         """
-        Allocate noise such that total epsilon equals target.
-
-        More sophisticated: ensures privacy budget constraint is satisfied.
-
-        Noise inversely proportional to sensitivity, then normalized:
-
-            raw_noise_i = 1.0 / sensitivity_i
-            noise_i = target_epsilon * raw_noise_i / Σ(raw_noise_j)
-
-        Args:
-            sensitivities: Normalized sensitivities in [0, 1]
-            target_epsilon: Total epsilon budget to allocate
-
-        Returns:
-            Per-layer noise multipliers summing to approximately target_epsilon
+        Simplified: σ_i = base_noise · (1 + sensitivity_i)
+        Higher sensitivity → more noise [2,4]
         """
-        if not sensitivities:
-            return {}
-
-        # Compute inverse proportionality (add small epsilon to avoid div/0)
-        raw_noise = {}
-        for name, sens in sensitivities.items():
-            raw_noise[name] = 1.0 / (sens + 1e-6)
-
-        # Normalize to sum to target epsilon
-        total_raw = sum(raw_noise.values())
-        noise_multipliers = {
-            name: target_epsilon * noise / total_raw
-            for name, noise in raw_noise.items()
-        }
-
-        return noise_multipliers
-
-    @staticmethod
-    def allocate_noise_by_layer_type(
-            sensitivities: Dict[str, float],
-            layer_classification: Dict[str, List[str]],
-            target_noise: float = 1.0,
-            layer_type_weights: Optional[Dict[str, float]] = None
-    ) -> Dict[str, float]:
-        """
-        Allocate noise differently by layer type.
-
-        Different layer types need different privacy levels:
-        - Input/Conv layers: Lower noise (preserve features)
-        - Hidden layers: Medium noise
-        - Output layers: Higher noise (classification critical)
-
-        Args:
-            sensitivities: Per-parameter sensitivity scores
-            layer_classification: Output from LayerClassifier.classify_layers()
-            target_noise: Base noise multiplier
-            layer_type_weights: Custom weights for each layer type
-
-        Returns:
-            Per-layer noise multipliers
-        """
-        if layer_type_weights is None:
-            layer_type_weights = {
-                'conv': 0.7,  # Less noise for feature extraction
-                'embedding': 0.7,
-                'hidden': 1.0,  # Medium noise
-                'batch_norm': 0.5,  # Minimal noise
-                'output': 1.5,  # More noise for classification
-                'unknown': 1.0,
-            }
-
         noise_multipliers = {}
-        classifier = LayerClassifier()
-
         for name, sens in sensitivities.items():
-            layer_type = classifier.get_layer_type(name, layer_classification)
-            base_multiplier = layer_type_weights.get(layer_type, 1.0)
-
-            # Combine layer-type prior with sensitivity
-            noise = target_noise * base_multiplier * (1.0 + sens)
+            noise = base_noise * (1.0 + sens)
             noise_multipliers[name] = np.clip(noise, 0.5, 3.0)
 
         return noise_multipliers
 
 
-class ClippingNormAllocator:
-    """
-    Allocate per-layer clipping norms based on sensitivity.
+class PrivacyAccountant:
+    @staticmethod
+    def compute_epsilon_per_layer(
+        sensitivity: float,
+        noise_multiplier: float,
+        delta: float = 1e-5,
+        clip_norm: float = 1.0
+    ) -> float:
+        """
+        Analytical Gaussian mechanism [1]:
+        ε = C · √(2·ln(1.25/δ)) / σ
+        """
+        if noise_multiplier <= 0:
+            return float('inf')
 
-    RELATIONSHIP: noise_multiplier ↔ clipping_norm
-
-    DP Theory: Larger clipping norm → larger gradients → need more noise
-              Smaller clipping norm → clipped more → less noise needed
-
-    Strategy:
-      High sensitivity layer: SMALL clip norm (forces clipping for privacy)
-      Low sensitivity layer: LARGE clip norm (allow larger gradients)
-    """
+        privacy_constant = math.sqrt(2 * math.log(1.25 / delta))
+        epsilon = (clip_norm * privacy_constant) / noise_multiplier
+        return epsilon
 
     @staticmethod
-    def get_layer_clip_norms(
-            sensitivities: Dict[str, float],
-            base_norm: float = 1.0,
-            inverse_scaling: bool = True
-    ) -> Dict[str, float]:
+    def compute_total_epsilon_advanced_composition(
+        per_layer_epsilons: List[float],
+        delta: float = 1e-5,
+        num_rounds: int = 1
+    ) -> float:
         """
-        Compute per-layer clipping norms.
-
-        Args:
-            sensitivities: Normalized sensitivities [0, 1]
-            base_norm: Base clipping norm
-            inverse_scaling: If True, high sens → small norm (more clipping)
-                           If False, high sens → large norm (less clipping)
-
-        Returns:
-            Per-layer clipping norms
+        Advanced composition [1, Theorem 3.20]:
+        ε_total = √(2·k·ln(1/δ')) · ε + k·ε·(e^ε - 1)
+        Approximation for small ε: ε_total ≈ ε·√(2·k·ln(1/δ))
         """
-        clipping_norms = {}
+        if not per_layer_epsilons:
+            return 0.0
 
-        for name, sens in sensitivities.items():
-            if inverse_scaling:
-                # High sensitivity → Small clip norm (more aggressive clipping)
-                norm = base_norm / (1.0 + sens)
-            else:
-                # High sensitivity → Large clip norm (allow larger updates)
-                norm = base_norm * (1.0 + sens)
+        k = len(per_layer_epsilons) * num_rounds
+        avg_epsilon = np.mean(per_layer_epsilons)
 
-            clipping_norms[name] = np.clip(norm, 0.1, 3.0)
+        if avg_epsilon < 0.1:
+            epsilon_total = avg_epsilon * math.sqrt(2 * k * math.log(1/delta))
+        else:
+            epsilon_total = math.sqrt(2 * k * math.log(1/delta)) * avg_epsilon + \
+                           k * avg_epsilon * (math.exp(avg_epsilon) - 1)
 
-        return clipping_norms
-
-
-class SensitivityReporter:
-    """Generate reports and visualizations of sensitivity analysis."""
-
-    @staticmethod
-    def print_sensitivity_report(
-            sensitivities: Dict[str, float],
-            layer_classification: Optional[Dict[str, List[str]]] = None,
-            noise_multipliers: Optional[Dict[str, float]] = None
-    ):
-        """
-        Print formatted sensitivity analysis report.
-
-        Args:
-            sensitivities: Sensitivity scores
-            layer_classification: Optional layer types
-            noise_multipliers: Optional noise allocation
-        """
-        if not sensitivities:
-            logger.warning("No sensitivity data available")
-            return
-
-        print("\n" + "=" * 90)
-        print("SIGNAL SENSITIVITY ANALYSIS REPORT")
-        print("=" * 90)
-
-        sorted_sens = sorted(sensitivities.items(), key=lambda x: -x[1])
-
-        classifier = LayerClassifier()
-        for i, (name, sens) in enumerate(sorted_sens[:15]):
-            bar_len = int(sens * 50)
-            bar = "█" * bar_len + "░" * (50 - bar_len)
-
-            layer_type = "unknown"
-            if layer_classification:
-                layer_type = classifier.get_layer_type(name, layer_classification)
-
-            if noise_multipliers and name in noise_multipliers:
-                noise_str = f"| noise={noise_multipliers[name]:.3f}"
-            else:
-                noise_str = "| noise=N/A"
-
-            print(f"{name:35s} | {bar} | sens={sens:.4f} | {layer_type:10s} {noise_str}")
-
-        print("=" * 90)
-        print(f"Average Sensitivity: {np.mean(list(sensitivities.values())):.4f}")
-        print(f"Max Sensitivity: {max(sensitivities.values()):.4f}")
-        print(f"Min Sensitivity: {min(sensitivities.values()):.4f}")
-
-        if layer_classification:
-            print(f"\nLayer Type Distribution:")
-            for ltype, layers in layer_classification.items():
-                if layers:
-                    avg_sens = np.mean([sensitivities.get(l, 0) for l in layers])
-                    print(f"  {ltype:15s}: {len(layers):3d} layers, avg sens={avg_sens:.4f}")
-
-        print("=" * 90 + "\n")
+        return epsilon_total
 
 
-# ============================================================================
-# INTEGRATION FUNCTIONS (Use these in your training code)
-# ============================================================================
+def compute_adaptive_sensitivity(
+    model: nn.Module,
+    dataloader,
+    num_batches: int = 5
+) -> Tuple[Dict[str, float], Dict[str, float]]:
+    analyzer = GradientSensitivityAnalyzer(model)
 
-def compute_adaptive_layer_sensitivity(
-        model: nn.Module,
-        dataloader,
-        num_batches: int = 5,
-        use_ema: bool = True
-) -> Tuple[Dict[str, float], Dict[str, List[str]]]:
-    """
-    Compute adaptive layer sensitivity for DP allocation.
+    raw_sensitivities = analyzer.sample_sensitivity_multi_batch(
+        dataloader, num_batches
+    )
 
-    RECOMMENDED: Call this at the start of training on first few batches.
+    normalized_sensitivities = analyzer.normalize_sensitivities(raw_sensitivities)
 
-    Args:
-        model: PyTorch model
-        dataloader: Training data
-        num_batches: Batches to sample for robustness
-        use_ema: Whether to use EMA smoothing
-
-    Returns:
-        (sensitivities, layer_classification)
-    """
-    analyzer = SensitivityAnalyzer(model)
-
-    # Sample gradients from multiple batches
-    raw_sensitivities = analyzer.sample_sensitivities(dataloader, num_batches)
-
-    # Normalize to [0, 1]
-    sensitivities = analyzer.normalize_sensitivities(raw_sensitivities)
-
-    # Get layer classification
-    layer_classification = analyzer.layer_classification
-
-    return sensitivities, layer_classification
+    return normalized_sensitivities, raw_sensitivities
 
 
-def get_adaptive_dp_config(
-        sensitivities: Dict[str, float],
-        layer_classification: Dict[str, List[str]],
-        target_epsilon: float = 1.0,
-        strategy: str = "inverse"
+def get_adaptive_dp_noise_config(
+    sensitivities: Dict[str, float],
+    target_epsilon: float = 1.0,
+    delta: float = 1e-5,
+    clip_norm: float = 1.0,
+    strategy: str = "proportional"
 ) -> Dict:
-    """
-    Get complete adaptive DP configuration based on sensitivity.
+    allocator = AdaptiveNoiseAllocator()
 
-    Args:
-        sensitivities: Normalized sensitivities [0, 1]
-        layer_classification: Layer types
-        target_epsilon: Target epsilon budget
-        strategy: "inverse", "normalized", or "by_layer_type"
-
-    Returns:
-        DP config with per-layer noise and clipping
-    """
-    allocator = NoiseAllocator()
-    clip_allocator = ClippingNormAllocator()
-
-    if strategy == "inverse":
-        noise_multipliers = allocator.allocate_noise_inversely_proportional(
-            sensitivities, target_noise=target_epsilon
+    if strategy == "proportional":
+        noise_multipliers = allocator.allocate_noise_simple_proportional(
+            sensitivities, base_noise=target_epsilon
         )
-    elif strategy == "normalized":
-        noise_multipliers = allocator.allocate_noise_normalized(
-            sensitivities, target_epsilon=target_epsilon
-        )
-    elif strategy == "by_layer_type":
-        noise_multipliers = allocator.allocate_noise_by_layer_type(
-            sensitivities, layer_classification, target_noise=target_epsilon
+    elif strategy == "gaussian":
+        noise_multipliers = allocator.allocate_noise_proportional_to_sensitivity(
+            sensitivities, target_epsilon, delta, clip_norm
         )
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
 
-    clipping_norms = clip_allocator.get_layer_clip_norms(sensitivities)
+    accountant = PrivacyAccountant()
+    per_layer_epsilons = [
+        accountant.compute_epsilon_per_layer(sens, noise_multipliers[name], delta, clip_norm)
+        for name, sens in sensitivities.items()
+    ]
+
+    total_epsilon = accountant.compute_total_epsilon_advanced_composition(
+        per_layer_epsilons, delta, num_rounds=1
+    )
+    clipping_norms = {name: clip_norm for name in sensitivities}
 
     return {
         "sensitivities": sensitivities,
         "noise_multipliers": noise_multipliers,
         "clipping_norms": clipping_norms,
+        "per_layer_epsilons": per_layer_epsilons,
+        "total_epsilon": total_epsilon,
         "strategy": strategy,
+        "clip_norm": clip_norm,
+        "per_layer": True,
     }
 
 
-if __name__ == "__main__":
-    # Example usage
-    from qpriviot_fl.task import make_model
-
-    model = make_model("cifar10")
-    print("Model loaded")
-
-    # In practice, use real dataloader:
-    # sensitivities, classification = compute_adaptive_layer_sensitivity(model, train_loader)
-
-    # For demo, compute on model initialization
-    analyzer = SensitivityAnalyzer(model)
-    dummy_sensitivities = {
-        name: np.random.uniform(0.3, 0.9)
-        for name, _ in model.named_parameters()
-    }
-
-    normalized_sens = analyzer.normalize_sensitivities(dummy_sensitivities)
-    layer_classification = analyzer.layer_classification
-
-    # Get DP config
-    dp_config = get_adaptive_dp_config(
-        normalized_sens,
-        layer_classification,
-        target_epsilon=1.0,
-        strategy="normalized"
-    )
-
-    # Print report
-    SensitivityReporter.print_sensitivity_report(
-        normalized_sens,
-        layer_classification,
-        dp_config["noise_multipliers"]
-    )

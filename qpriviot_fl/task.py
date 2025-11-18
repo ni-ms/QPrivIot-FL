@@ -142,7 +142,7 @@ def load_femnist(partition_id: int, num_partitions: int, batch_size: int):
 
         return trainloader, testloader
     except Exception as e:
-        print(f"⚠️ FEMNIST loading failed: {e}. Using CIFAR-10 as fallback.")
+        print(f" FEMNIST loading failed: {e}. Using CIFAR-10 as fallback.")
         return load_cifar10(partition_id, num_partitions, batch_size)
 
 
@@ -284,7 +284,7 @@ def train(
     # Check if per-layer DP is requested
     if dp_config and dp_config.get("per_layer", False):
         use_per_layer_dp = True
-        print(f"🎯 Using PER-LAYER DP with {len(dp_config['noise_multipliers'])} layers")
+        print(f" Using PER-LAYER DP with {len(dp_config['noise_multipliers'])} layers")
 
     elif dp_config:
         # Standard global DP via Opacus
@@ -300,10 +300,10 @@ def train(
                 device
             )
             dp_attached = True
-            print("✅ Global DP attached successfully")
+            print(" Global DP attached successfully")
 
         except Exception as e:
-            print(f"❌ DP attachment failed: {e}")
+            print(f" DP attachment failed: {e}")
             import traceback
             traceback.print_exc()
             dp_config = None
@@ -358,16 +358,16 @@ def train(
         # Simplified for normalized allocation
         base_epsilon = 1.0 / max(dp_config["noise_multipliers"].values())
         epsilon = base_epsilon * (epochs ** 0.5)
-        print(f"✅ Per-layer Privacy spent: ε≈{epsilon:.2f} (approximate)")
+        print(f" Per-layer Privacy spent: ε≈{epsilon:.2f} (approximate)")
 
 
 
     elif privacy_engine and dp_attached:
         try:
             epsilon = privacy_engine.get_epsilon(delta=1e-5)
-            print(f"✅ Global Privacy spent: ε={epsilon:.2f} (δ=1e-5)")
+            print(f"Global Privacy spent: ε={epsilon:.2f} (δ=1e-5)")
         except Exception as e:
-            print(f"⚠️ Could not compute epsilon: {e}")
+            print(f" Could not compute epsilon: {e}")
             epsilon = 0.0
     else:
         epsilon = 0.0

@@ -4,9 +4,9 @@ import torch
 from flwr.client import ClientApp, NumPyClient
 from flwr.client.mod import secaggplus_mod
 from flwr.common import Context
-from qpriviot_fl.device_profile import profile_device, is_eligible_for_training
-from qpriviot_fl.sensitivity import SensitivityReporter, get_adaptive_dp_config, compute_adaptive_layer_sensitivity
-from qpriviot_fl.task import make_model, get_weights, set_weights, load_data, train, test
+from qpriviot_fl.device_profile import profile_device, is_eligible_for_training, get_device_aware_noise_multiplier
+from qpriviot_fl.sensitivity import compute_adaptive_sensitivity, get_adaptive_dp_noise_config
+from qpriviot_fl.task import make_model, get_weights, set_weights, load_data, train, test, ConvergenceTracker
 
 
 class QPrivIoTClient(NumPyClient):
@@ -40,6 +40,7 @@ class QPrivIoTClient(NumPyClient):
         self.total_rounds = total_rounds
         self.current_round = 0
         self.last_valid_round = -1
+        self.convergence_tracker = ConvergenceTracker(window_size=3)  # Phase 3
 
         if device == "auto":
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -68,9 +69,9 @@ class QPrivIoTClient(NumPyClient):
             self.last_valid_round = config_round
         elif self.last_valid_round >= 0:
             self.current_round = self.last_valid_round + 1
-            print(f"⚠️ Client {self.partition_id}: Using round fallback {self.current_round}")
+            print(f" Client {self.partition_id}: Using round fallback {self.current_round}")
         else:
-            print(f"❌ Client {self.partition_id}: No valid round received")
+            print(f" Client {self.partition_id}: No valid round received")
 
         convergence_score = float(config.get("convergence_score", 0.0))
 
@@ -78,7 +79,7 @@ class QPrivIoTClient(NumPyClient):
         use_adaptive_dp = bool(config.get("use_adaptive_dp", True))
 
         if not is_eligible_for_training(device_profile):
-            print(f"⚠️ Client {self.partition_id} [{device_profile.get('device_type', 'unknown')}] dropped: "
+            print(f"Client {self.partition_id} [{device_profile.get('device_type', 'unknown')}] dropped: "
                   f"resource_score={device_profile['resource_score']:.2f}")
 
             model = make_model(self.dataset_name)
@@ -102,20 +103,22 @@ class QPrivIoTClient(NumPyClient):
         model.to(self.device)
         set_weights(model, parameters)
 
-        # Compute per-layer sensitivity BEFORE DP attachment
-        sensitivities, layer_classification = compute_adaptive_layer_sensitivity(
-            model,
-            self.trainloader,
-            num_batches=3,
-            use_ema=True
-        )
+        # sensitivities, raw_sensitivities = compute_adaptive_sensitivity(
+        #     model,
+        #     self.trainloader,
+        #     num_batches=3
+        # )
+        #
+        # avg_sensitivity = sum(sensitivities.values()) / max(len(sensitivities), 1)
 
-        avg_sensitivity = sum(sensitivities.values()) / max(len(sensitivities), 1)
+        #  Device-aware DP doesn't need per-layer sensitivity
+        sensitivities = {}
+        avg_sensitivity = 0.0
 
         if not use_dp:
             dp_config = None
             dp_mode = "no_dp"
-            print(f"🔓 Client {self.partition_id}: Training WITHOUT DP")
+            print(f" Client {self.partition_id}: Training WITHOUT DP")
 
         elif not use_adaptive_dp:
             # Standard DP: global noise
@@ -125,40 +128,38 @@ class QPrivIoTClient(NumPyClient):
                 "per_layer": False,  # Flag for global DP
             }
             dp_mode = "standard_dp"
-            print(f"🔒 Client {self.partition_id}: Training with STANDARD DP "
+            print(f"Client {self.partition_id}: Training with STANDARD DP "
                   f"(noise={dp_config['noise_multiplier']:.2f}, clip={dp_config['max_grad_norm']:.2f})")
 
         else:
-            # Compute per-round epsilon budget (divide total by num rounds)
-            per_round_epsilon = 10.0 / max(self.total_rounds, 1)  # 10.0 / 10 = 1.0 per round
-            base_noise = per_round_epsilon * (
-                        1.0 - convergence_score * (self.current_round / max(self.total_rounds, 1)))
-            base_noise = max(0.5, base_noise)
 
-            # Get per-layer configuration
-            dp_config = get_adaptive_dp_config(
-                sensitivities=sensitivities,
-                layer_classification=layer_classification,
-                target_epsilon=base_noise,
-                strategy="normalized"  # Respects epsilon budget
-            )
+            base_noise_multiplier = get_device_aware_noise_multiplier(device_profile)
 
-            # Add metadata
-            dp_config["per_layer"] = True
-            dp_config["dataset_name"] = self.dataset_name
+            convergence_score = self.convergence_tracker.get_convergence_score()
 
-            dp_mode = "adaptive_dp_per_layer"
+            # Reduce noise as training converges
+            # Early rounds: full noise (convergence=0 → factor=1.0)
+            # Late rounds: reduced noise (convergence=1 → factor=0.6)
+            convergence_reduction = 1.0 - (convergence_score * 0.4)
+            noise_multiplier = base_noise_multiplier * convergence_reduction
 
-            print(f"🎯 Client {self.partition_id} [{device_profile.get('device_type', 'unknown')}]: "
-                  f"Training with PER-LAYER ADAPTIVE DP")
+            noise_multiplier = max(noise_multiplier, 0.5)
 
-            # Print sensitivity report (first round only)
-            if self.current_round == 0:
-                SensitivityReporter.print_sensitivity_report(
-                    sensitivities,
-                    layer_classification,
-                    dp_config["noise_multipliers"]
-                )
+            dp_config = {
+                "noise_multiplier": noise_multiplier,
+                "max_grad_norm": 1.0,
+                "per_layer": False,
+                "device_type": device_profile.get("device_type", "unknown"),
+                "resource_score": device_profile.get("resource_score", 0.5),
+                "convergence_score": convergence_score,
+            }
+            dp_mode = "convergence_aware_dp"
+
+            print(f"   Client {self.partition_id}: Convergence-aware DP")
+            print(f"   Device: {device_profile.get('device_type')}")
+            print(f"   Base noise: {base_noise_multiplier:.2f}")
+            print(f"   Convergence: {convergence_score:.2f}")
+            print(f"   Final noise: {noise_multiplier:.2f}")
 
         try:
             results = train(
@@ -171,9 +172,12 @@ class QPrivIoTClient(NumPyClient):
                 dp_config=dp_config,
                 dataset_name=self.dataset_name,
             )
+            train_loss = results.get("train_loss", 0.0)
+            if train_loss > 0:
+                self.convergence_tracker.update(train_loss)
 
         except Exception as e:
-            print(f"❌ Client {self.partition_id} training failed: {e}")
+            print(f" Client {self.partition_id} training failed: {e}")
             import traceback
             traceback.print_exc()
 
@@ -189,24 +193,18 @@ class QPrivIoTClient(NumPyClient):
             }
 
         metrics = {
-            # Training metrics
             "train_loss": float(results.get("train_loss") or 0.0),
             "val_loss": float(results.get("val_loss") or 0.0),
             "val_accuracy": float(results.get("val_accuracy") or 0.0),
 
-            # Privacy metrics
             "epsilon": float(results.get("epsilon") or 0.0),
             "dp_mode": dp_mode,
-            "avg_sensitivity": float(avg_sensitivity),
 
-            # Device type only (NO sensitive metrics like CPU%, RAM%, battery%)
             "device_type": str(device_profile.get("device_type", "unknown")),
+            "resource_score": float(device_profile.get("resource_score", 0.0)),
+            "noise_multiplier": float(dp_config.get("noise_multiplier", 0.0)) if dp_config else 0.0,
 
-            # DP config summary
-            "per_layer_dp": bool(dp_config.get("per_layer", False)) if dp_config else False,
-            "num_layers": len(sensitivities) if sensitivities else 0,
-
-            # Status
+            "convergence_score": float(dp_config.get("convergence_score", 0.0)) if dp_config else 0.0,
             "dropped": 0,
         }
 
@@ -221,7 +219,7 @@ class QPrivIoTClient(NumPyClient):
         try:
             loss, accuracy = test(model, self.valloader, self.device, self.dataset_name)
         except Exception as e:
-            print(f"❌ Client {self.partition_id} evaluation failed: {e}")
+            print(f" Client {self.partition_id} evaluation failed: {e}")
             return 0.0, len(self.valloader.dataset), {"accuracy": 0.0, "error": str(e)}
 
         return float(loss), len(self.valloader.dataset), {

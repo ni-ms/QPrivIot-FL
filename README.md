@@ -39,24 +39,12 @@ You can run Flower on Docker too! Check out the [Flower with Docker](https://flo
 
 
 ```bash
-# Experiment 1: No DP
-# Edit pyproject.toml: use-dp=false, use-adaptive-dp=false
-flwr run .
-mv training_metrics_cifar10.json results_no_dp.json
-mv results_cifar10_1.png plot_no_dp.png
 
-# Experiment 2: Uniform DP
-# Edit pyproject.toml: use-dp=true, use-adaptive-dp=false
-flwr run .
-mv training_metrics_cifar10.json results_uniform_dp.json
-mv results_cifar10_1.png plot_uniform_dp.png
+flwr run . --run-config use-dp=false
 
-# Experiment 3: Adaptive DP (Your Method)
-# Edit pyproject.toml: use-dp=true, use-adaptive-dp=true
-flwr run .
-mv training_metrics_cifar10.json results_adaptive_dp.json
-mv results_cifar10_1.png plot_adaptive_dp.png
+flwr run . --run-config use-dp=true use-adaptive-dp=false
 
-# Done! Now you have all results for your paper!
+
+flwr run . --run-config use-dp=true use-adaptive-dp=true
 
 ```

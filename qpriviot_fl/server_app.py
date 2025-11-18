@@ -37,9 +37,9 @@ def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
     # Log dropout statistics
     if dropped_clients:
         dropped_types = [m.get("device_type", "unknown") for _, m in dropped_clients]
-        log(WARNING, f"⚠️ Dropped clients: {len(dropped_clients)} (types: {set(dropped_types)})")
+        log(WARNING, f" Dropped clients: {len(dropped_clients)} (types: {set(dropped_types)})")
     if error_clients:
-        log(WARNING, f"❌ Error clients: {len(error_clients)}")
+        log(WARNING, f" Error clients: {len(error_clients)}")
 
     if not valid_metrics:
         log(WARNING, "No valid metrics from any client this round")
@@ -133,7 +133,6 @@ def create_fit_config_fn(
 ) -> Callable[[int], Dict]:
     """
     Create fit_config function with closure over trackers.
-    ✅ FIXED: Proper closure to access trackers
     """
 
     def fit_config(server_round: int) -> Dict:
@@ -186,13 +185,13 @@ def create_fit_metrics_aggregation_fn(
 
         # Log key metrics
         if "val_accuracy" in aggregated:
-            log(INFO, f"✅ Val Accuracy: {aggregated['val_accuracy'] * 100:.2f}%")
+            log(INFO, f" Val Accuracy: {aggregated['val_accuracy'] * 100:.2f}%")
 
         if "val_loss" in aggregated:
-            log(INFO, f"📉 Val Loss: {aggregated['val_loss']:.4f}")
+            log(INFO, f" Val Loss: {aggregated['val_loss']:.4f}")
 
         if "avg_epsilon" in aggregated:
-            log(INFO, f"🔒 Privacy (ε): {aggregated['avg_epsilon']:.4f} "
+            log(INFO, f" Privacy (ε): {aggregated['avg_epsilon']:.4f} "
                       f"[{aggregated['min_epsilon']:.4f}, {aggregated['max_epsilon']:.4f}]")
         log(INFO, f"Convergence Score: {convergence_score:.4f}")
         log(INFO, f"Resource Score: {resource_score:.4f}")
@@ -203,17 +202,17 @@ def create_fit_metrics_aggregation_fn(
         num_total = aggregated.get("total_clients_attempted", 0)
 
         if num_total > 0:
-            log(INFO, f"👥 Clients: {num_valid} valid, {num_dropped} dropped, "
+            log(INFO, f" Clients: {num_valid} valid, {num_dropped} dropped, "
                       f"{num_errors} errors (total: {num_total})")
 
         # Log per-layer DP usage
         if "per_layer_dp_clients" in aggregated:
-            log(INFO, f"🎯 Per-layer DP: {aggregated['per_layer_dp_clients']}/{num_valid} clients")
+            log(INFO, f" Per-layer DP: {aggregated['per_layer_dp_clients']}/{num_valid} clients")
 
         # Log DP modes distribution
         if "dp_modes" in aggregated:
             modes_str = ", ".join([f"{k}:{v}" for k, v in aggregated["dp_modes"].items()])
-            log(INFO, f"🔐 DP Modes: {modes_str}")
+            log(INFO, f" DP Modes: {modes_str}")
 
         return aggregated
 
@@ -236,7 +235,7 @@ def create_secagg_workflow(context: Context):
     use_secagg = bool(context.run_config.get("use-secagg", True))
 
     if not use_secagg:
-        log(WARNING, "⚠️ SecAgg DISABLED - using standard aggregation (NOT privacy-preserving)")
+        log(WARNING, "SecAgg DISABLED - using standard aggregation (NOT privacy-preserving)")
         return None
 
     try:
@@ -254,11 +253,11 @@ def create_secagg_workflow(context: Context):
             log(WARNING, "reconstruction_threshold < 1. Setting to 1")
             reconstruction_threshold = 1
 
-        log(INFO, "🔐 SecAggPlus Configuration:")
+        log(INFO, "SecAggPlus Configuration:")
         log(INFO, f"  - num_shares: {num_shares}")
         log(INFO, f"  - reconstruction_threshold: {reconstruction_threshold}")
         log(INFO, f"  - max_weight: {max_weight}")
-        log(INFO, "✅ Secure aggregation enabled - model updates encrypted")
+        log(INFO, "Secure aggregation enabled - model updates encrypted")
 
         return SecAggPlusWorkflow(
             num_shares=num_shares,
@@ -267,7 +266,7 @@ def create_secagg_workflow(context: Context):
         )
 
     except Exception as e:
-        log(WARNING, f"❌ Failed to create SecAggPlus: {e}. Falling back to standard aggregation")
+        log(WARNING, f" Failed to create SecAggPlus: {e}. Falling back to standard aggregation")
         return None
 
 
@@ -275,7 +274,6 @@ def create_secagg_workflow(context: Context):
 def main(grid: Grid, context: Context) -> None:
     """
     Main server logic with adaptive privacy and convergence tracking.
-    ✅ FIXED: Creates fresh instances per run (thread-safe)
     """
 
     dataset_name = str(context.run_config.get("dataset", "cifar10"))
@@ -339,21 +337,21 @@ def main(grid: Grid, context: Context) -> None:
         traceback.print_exc()
 
     log(INFO, f"\n{'=' * 80}")
-    log(INFO, "🎉 TRAINING COMPLETE!")
+    log(INFO, " TRAINING COMPLETE!")
     log(INFO, f"{'=' * 80}")
 
     privacy_report = privacy_accountant.get_privacy_report()
-    log(INFO, f"🔒 Total Privacy Spent (ε): {privacy_report['total_epsilon']:.4f}")
-    log(INFO, f"📊 Rounds Completed: {privacy_report['rounds_completed']}")
+    log(INFO, f" Total Privacy Spent (ε): {privacy_report['total_epsilon']:.4f}")
+    log(INFO, f" Rounds Completed: {privacy_report['rounds_completed']}")
 
     if privacy_report['rounds_completed'] > 0:
-        log(INFO, f"📈 Average ε per Round: {privacy_report['avg_epsilon_per_round']:.4f}")
-        log(INFO, f"💰 Remaining Budget: {privacy_report['remaining_budget']:.4f}")
+        log(INFO, f" Average ε per Round: {privacy_report['avg_epsilon_per_round']:.4f}")
+        log(INFO, f" Remaining Budget: {privacy_report['remaining_budget']:.4f}")
 
         if privacy_report['total_epsilon'] > privacy_report.get('target_epsilon', float('inf')):
-            log(WARNING, f"⚠️ Privacy budget EXCEEDED target!")
+            log(WARNING, f"️ Privacy budget EXCEEDED target!")
         else:
-            log(INFO, f"✅ Privacy budget within target")
+            log(INFO, f" Privacy budget within target")
 
     if hasattr(strategy, 'parameters') and strategy.parameters is not None:
         try:
@@ -367,17 +365,20 @@ def main(grid: Grid, context: Context) -> None:
         except Exception as e:
             log(WARNING, f"Could not save model: {e}")
 
+
     all_metrics = metrics_logger.get_all_metrics()
     if len(all_metrics) > 0:
         try:
-            metrics_path = f"training_metrics_{dataset_name}.json"
+            if not use_dp:
+                metrics_path = f"results_no_dp.json"
+            elif use_adaptive_dp:
+                metrics_path = f"results_adaptive_dp.json"
+            else:
+                metrics_path = f"results_uniform_dp.json"
+
             metrics_logger.save_to_file(metrics_path)
-
-            plot_path = f"results_{dataset_name}.png"
-            plot_comprehensive_results(all_metrics, privacy_report, save_path=plot_path)
-
             log(INFO, f"Metrics saved to {metrics_path}")
-            log(INFO, f"Results plot saved to {plot_path}")
+
         except Exception as e:
             log(WARNING, f"Could not save results: {e}")
 

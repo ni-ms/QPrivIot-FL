@@ -125,7 +125,7 @@ def is_eligible_for_training(
     )
 
     if not eligible:
-        print(f"❌ Device {profile.get('device_type', 'unknown')} dropped: "
+        print(f" Device {profile.get('device_type', 'unknown')} dropped: "
               f"cpu_avail={cpu_available:.1f}%, ram_avail={ram_available:.1f}%, "
               f"battery={profile['battery_percent']:.1f}%, bw={profile['bandwidth_mbps']:.1f}Mbps")
 
@@ -139,6 +139,49 @@ def detect_straggler(profile: Dict[str, float], threshold: float = 0.3) -> bool:
     is_straggler = profile["resource_score"] < threshold
 
     if is_straggler:
-        print(f"⚠️ Straggler: {profile.get('device_type', 'unknown')} (score={profile['resource_score']:.2f})")
+        print(f" Straggler: {profile.get('device_type', 'unknown')} (score={profile['resource_score']:.2f})")
 
     return is_straggler
+
+
+def get_device_aware_noise_multiplier(profile: Dict[str, float]) -> float:
+    """
+    Allocate noise multiplier based on device type and resources.
+
+    Phase 2: Device-Aware Privacy Allocation
+    - Low-power devices (RPi Zero, IoT sensors) → less noise (better utility)
+    - Medium-power devices (Smartphone, RPi 4) → balanced noise
+    - High-power devices (Edge server) → more noise (stronger privacy)
+
+    Args:
+        profile: Device profile from profile_device()
+
+    Returns:
+        noise_multiplier: Float value for DP noise (0.8 to 1.2)
+    """
+    device_type = profile.get("device_type", "unknown")
+    resource_score = profile.get("resource_score", 0.5)
+
+    # Device-based allocation (Phase 2)
+    if device_type == "raspberry_pi_zero" or device_type == "iot_sensor":
+        noise_multiplier = 0.8
+        print(f" Low-power device ({device_type}): noise_mult={noise_multiplier:.2f}")
+
+    elif device_type == "smartphone" or device_type == "raspberry_pi_4":
+        noise_multiplier = 1.0
+        print(f" Medium-power device ({device_type}): noise_mult={noise_multiplier:.2f}")
+
+    elif device_type == "edge_server":
+        noise_multiplier = 1.2
+        print(f" High-power device ({device_type}): noise_mult={noise_multiplier:.2f}")
+
+    else:
+        if resource_score < 0.4:
+            noise_multiplier = 0.8
+        elif resource_score < 0.7:
+            noise_multiplier = 1.0
+        else:
+            noise_multiplier = 1.2
+        print(f" Unknown device: resource_score={resource_score:.2f} → noise={noise_multiplier:.2f}")
+
+    return noise_multiplier
