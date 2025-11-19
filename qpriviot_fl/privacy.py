@@ -66,7 +66,7 @@ def attach_dp_to_optimizer(
 
     optimizer_class = type(optimizer)
     lr = optimizer.param_groups[0]['lr']
-    base_optimizer = optimizer_class(model.parameters(), lr=lr)
+    base_optimizer = optimizer_class(model.parameters())
 
     print(f" Creating CustomDPOptimizer")
     print(f"   noise={noise_multiplier:.2f}, clip={max_grad_norm:.2f}")
