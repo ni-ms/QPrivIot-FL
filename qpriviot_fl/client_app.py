@@ -1,315 +1,208 @@
-"""
-Flower client with SecAgg, adaptive DP, and device profiling - SENSITIVITY ENABLED.
-"""
+import math
+import time
 import torch
-from flwr.client import ClientApp, NumPyClient
-from flwr.client.mod import secaggplus_mod
+import numpy as np
+import traceback
+from flwr.client import NumPyClient
+from flwr.clientapp import ClientApp
 from flwr.common import Context
 
-from qpriviot_fl.device_profile import (
-    profile_device,
-    is_eligible_for_training,
-    get_device_aware_noise_multiplier,
+from qpriviot_fl.config import DEFAULT_CONFIG as CONFIG
+from qpriviot_fl.device_profile import profile_device
+from qpriviot_fl.task import load_data, make_model, train, test
+from qpriviot_fl.privacy_utils import (
+    compute_gradient_sensitivity,
+    allocate_adaptive_noise,
+    apply_dp_noise_per_layer,
+    quantize,
+    generate_zero_sum_masks
 )
-from qpriviot_fl.sensitivity import (
-    compute_adaptive_sensitivity,
-    get_adaptive_dp_noise_config,
-)
-from qpriviot_fl.task import (
-    make_model,
-    get_weights,
-    set_weights,
-    load_data,
-    train,
-    test,
-    ConvergenceTracker,
-)
+
+DEVICE_MAP = {"raspberry_pi_4": 1, "raspberry_pi_zero": 2, "smartphone": 3, "iot_sensor": 4}
 
 
 class QPrivIoTClient(NumPyClient):
-    """FL client with adaptive privacy and resource awareness.
+    def __init__(self, context: Context):
+        self.context = context
+        self.run_config = context.run_config
+        self.node_config = context.node_config
 
-    Features:
-    - Device profiling for heterogeneous IoT environments
-    - Sensitivity-based noise allocation (NOW ENABLED!)
-    - Convergence-aware privacy scheduling
-    - Secure aggregation with SecAgg+
-    """
-
-    def __init__(
-            self,
-            train_loader,
-            val_loader,
-            partition_id: int,
-            local_epochs: int,
-            learning_rate: float,
-            dataset_name: str,
-            total_rounds: int,
-            device: str = "auto",
-    ):
-        self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.partition_id = partition_id
-        self.local_epochs = local_epochs
-        self.learning_rate = learning_rate
-        self.dataset_name = dataset_name
-        self.total_rounds = total_rounds
-        self.current_round = 0
-        self.last_valid_round = -1
-        self.convergence_tracker = ConvergenceTracker(window_size=3)
-
-        if device == "auto":
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            self.device = torch.device(device)
+        self.profile = profile_device(CONFIG)
+        self.res_score = float(self.profile.get("resource_score", 0.0))
+        self.device_type = self.profile.get("device_type", "unknown")
+        self.partition_id = int(self.node_config.get("partition-id", 0))
+        self.num_partitions = int(self.node_config.get("num-partitions", 1))
 
     def fit(self, parameters, config):
-        """Train model with configurable DP modes.
-
-        Supports:
-        - No DP (baseline)
-        - Standard DP (fixed noise)
-        - Adaptive DP (sensitivity-based per-layer noise) ← NOW WORKS!
-
-        Returns:
-            Tuple of (weights, num_examples, metrics)
-        """
-        # Profile device
-        device_profile = profile_device()
-
-        # Round counter with fallback
-        config_round = int(config.get("current_round", -1))
-        if config_round >= 0:
-            self.current_round = config_round
-            self.last_valid_round = config_round
-        elif self.last_valid_round >= 0:
-            self.current_round = self.last_valid_round + 1
-            print(f"Client {self.partition_id}: Using round fallback {self.current_round}")
-        else:
-            print(f"Client {self.partition_id}: No valid round received")
-
-        convergence_score = float(config.get("convergence_score", 0.0))
-        use_dp = bool(config.get("use_dp", True))
-        use_adaptive_dp = bool(config.get("use_adaptive_dp", True))
-        target_epsilon = float(config.get("target_epsilon", 1.0))
-
-        # Check device eligibility
-        if not is_eligible_for_training(device_profile):
-            print(
-                f"Client {self.partition_id} ({device_profile.get('device_type', 'unknown')}) "
-                f"dropped (resource_score={device_profile['resource_score']:.2f})"
-            )
-            model = make_model(self.dataset_name)
-            model.to(self.device)
-            set_weights(model, parameters)
-            return (
-                get_weights(model),
-                -1,
-                {
-                    "train_loss": 0.0,
-                    "val_loss": 0.0,
-                    "val_accuracy": 0.0,
-                    "epsilon": 0.0,
-                    "device_type": device_profile.get("device_type", "unknown"),
-                    "avg_sensitivity": 0.0,
-                    "noise_multiplier": 0.0,
-                    "max_grad_norm": 0.0,
-                    "dropped": 1,
-                },
-            )
-
-        # Create model ONCE before any checks
-        model = make_model(self.dataset_name)
-        model.to(self.device)
-        set_weights(model, parameters)
-
-        avg_sensitivity = 0.0
-
-        if not use_dp:
-            dp_config = None
-            dp_mode = "no_dp"
-            print(f"Client {self.partition_id}: Training WITHOUT DP")
-
-        elif not use_adaptive_dp:
-            # Standard DP (global noise)
-            dp_config = {
-                "noise_multiplier": 1.0,
-                "max_grad_norm": 1.0,
-                "per_layer": False,
-            }
-            dp_mode = "standard_dp"
-            print(
-                f"Client {self.partition_id}: Training with STANDARD DP "
-                f"(noise={dp_config['noise_multiplier']:.2f}, "
-                f"clip={dp_config['max_grad_norm']:.2f})"
-            )
-
-        else:
-            print(f"Client {self.partition_id}: Computing per-layer sensitivities...")
-
-            try:
-                # Step 1: Compute sensitivities
-                normalized_sens, raw_sens = compute_adaptive_sensitivity(
-                    model=model,
-                    dataloader=self.train_loader,
-                    num_batches=3
-                )
-
-                print(f"  → Computed sensitivities for {len(normalized_sens)} layers")
-                avg_sensitivity = sum(normalized_sens.values()) / max(len(normalized_sens), 1)
-                print(f"  → Average sensitivity: {avg_sensitivity:.4f}")
-
-                # Step 2: Get adaptive noise configuration
-                dp_config = get_adaptive_dp_noise_config(
-                    sensitivities=normalized_sens,
-                    target_epsilon=target_epsilon,
-                    delta=1e-5,
-                    clip_norm=1.0,
-                    strategy="gaussian"
-                )
-
-
-
-                dp_mode = "adaptive_sensitivity_dp"
-
-                print(f"Client {self.partition_id}: ADAPTIVE SENSITIVITY DP enabled")
-                print(f"  → Target epsilon: {target_epsilon:.2f}")
-                print(f"  → Computed epsilon: {dp_config.get('total_epsilon', 0):.2f}")
-                print(f"  → Per-layer noise: {len(dp_config['noise_multipliers'])} layers")
-
-
-            except Exception as e:
-                print(f"Client {self.partition_id}: Sensitivity computation failed: {e}")
-                import traceback
-                traceback.print_exc()
-
-                # Fallback to convergence-aware DP
-                base_noise = get_device_aware_noise_multiplier(
-                    device_profile, convergence_score
-                )
-                convergence_reduction = (1.0 - convergence_score) * 0.4
-                noise_multiplier = base_noise * (1.0 - convergence_reduction)
-                noise_multiplier = max(noise_multiplier, 0.5)
-
-                dp_config = {
-                    "noise_multiplier": noise_multiplier,
-                    "max_grad_norm": 1.0,
-                    "per_layer": False,
-                    "device_type": device_profile.get("device_type", "unknown"),
-                    "resource_score": device_profile.get("resource_score", 0.5),
-                    "convergence_score": convergence_score,
-                }
-                dp_mode = "convergence_aware_dp_fallback"
-                print(f"  → Using fallback convergence-aware DP (noise={noise_multiplier:.2f})")
-
-        # Train the model
+        """Train parameters on the locally held dataset."""
         try:
-            results = train(
-                model,
-                self.train_loader,
-                self.val_loader,
-                self.local_epochs,
-                self.learning_rate,
-                self.device,
-                dp_config=dp_config,
-                dataset_name=self.dataset_name,
-            )
 
-            train_loss = results.get("train_loss", 0.0)
-            if train_loss > 0:
-                self.convergence_tracker.update(train_loss)
+            use_secagg = bool(config.get("use_secagg", False))
+            use_dp = bool(config.get("use_dp", False))
+            use_adaptive_dp = bool(config.get("use_adaptive_dp", False))
+
+            base_noise = float(self.run_config.get("base-noise", 1.2))
+
+            base_latency = float(getattr(CONFIG.resource, "base_latency_seconds", 0.2)) / max(self.res_score, 0.01)
+            time.sleep(min(base_latency, 0.5))
+
+            cutoff = float(getattr(CONFIG.resource, "min_eligible_score", 0.2))
+            if self.res_score < cutoff:
+                print(
+                    f"CLIENT {self.partition_id}: Skipped due to low resource score ({self.res_score:.2f} < {cutoff:.2f})")
+                return parameters, 0, {
+                    "resource_score": self.res_score,
+                    "client_latency": base_latency,
+                    "train_loss": 0.0,
+                    "avg_noise": 0.0,
+                    "secagg_active": False,
+                    "dp_mode": "Skipped"
+                }
+
+            ds_name = str(self.run_config.get("dataset", "cifar10"))
+            local_epochs = int(self.run_config.get("local-epochs", 1))
+            learning_rate = float(self.run_config.get("learning-rate", 0.01))
+
+            train_loader, _ = load_data(self.partition_id, self.num_partitions, 32, ds_name)
+            device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+            model = make_model(ds_name).to(device)
+
+            self._set_parameters(model, parameters, device)
+
+            initial_weights_list = [p.detach().clone() for p in model.parameters()]
+
+            layer_sensitivities = compute_gradient_sensitivity(model, train_loader, device=device)
+
+            # CAPTURE SENSITIVITY METRICS
+            avg_sensitivity = float(np.mean(list(layer_sensitivities.values()))) if layer_sensitivities else 0.0
+
+
+            noise_mults = {}
+            clip_norms_map = {}
+            dp_was_applied = False
+
+            base_clip_norm_res = float(getattr(CONFIG.privacy, "initial_clip_norm", 0.05)) * max(self.res_score, 0.01)
+
+            if use_adaptive_dp:
+
+                server_convergence = float(config.get("convergence_score", 0.0))
+                target_eps = float(self.run_config.get("target-epsilon", 10.0))
+                total_rounds = int(self.run_config.get("num-server-rounds", 10))
+
+                round_base_eps = target_eps / math.sqrt(max(total_rounds, 1))
+                adaptive_round_eps = round_base_eps * (1.0 + server_convergence)
+
+                noise_mults, clip_norms_map, _ = allocate_adaptive_noise(
+                    sensitivities=layer_sensitivities,
+                    target_epsilon=adaptive_round_eps,
+                    base_clip_norm=base_clip_norm_res,
+                )
+                dp_was_applied = True
+                dp_mode = "Adaptive"
+                print(f"CLIENT {self.partition_id}: Adaptive DP (Conv={server_convergence:.2f})")
+
+            elif use_dp:
+
+                noise_mults = {name: base_noise for name in layer_sensitivities.keys()}
+
+                fixed_clip_norm = base_clip_norm_res * 2
+                clip_norms_map = {name: fixed_clip_norm for name in layer_sensitivities.keys()}
+                dp_was_applied = True
+                dp_mode = "Fixed"
+                print(f"CLIENT {self.partition_id}: Fixed DP (Noise={base_noise:.3f})")
+
+            else:
+
+                fixed_clip_norm = 10.0
+                clip_norms_map = {name: fixed_clip_norm for name in layer_sensitivities.keys()}
+                dp_mode = "None"
+                print(f"CLIENT {self.partition_id}: Baseline Mode (No DP)")
+                # CAPTURE CLIPPING NORMS
+            avg_clip_norm = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
+
+            train_loss = float(train(model, train_loader, epochs=local_epochs, lr=learning_rate, device=device))
+
+            if dp_was_applied:
+                apply_dp_noise_per_layer(model, initial_weights_list, noise_mults, clip_norms_map)
+
+                # EVALUATE ON VALIDATION SET BEFORE RETURNING
+            eval_params = self._get_parameters(model)
+            val_loss, val_num_samples, eval_metrics_dict = self.evaluate(eval_params, config)
+
+            updated_params_final = self._get_parameters(model)
+            initial_weights_numpy = [p.cpu().numpy() for p in initial_weights_list]
+
+            updated_deltas = [
+                updated_params_final[i] - initial_weights_numpy[i]
+                for i in range(len(updated_params_final))
+            ]
+
+            avg_noise = float(np.mean(list(noise_mults.values()))) if noise_mults else 0.0
+
+            metrics = {"train_loss": train_loss, "resource_score": self.res_score, "avg_noise": avg_noise,
+                       "client_latency": base_latency, "secagg_active": use_secagg, "dp_mode": dp_mode,
+                       "device_id": DEVICE_MAP.get(self.device_type, 0), "evaluation_metrics": eval_metrics_dict,
+                       "val_loss": float(val_loss), "avg_sensitivity": avg_sensitivity, "clip_norm": avg_clip_norm}
+
+            if use_secagg:
+                print(f"CLIENT {self.partition_id}: Applying SecAgg (Quantization and Masking)")
+
+                secagg_seed = int(config.get("secagg_seed", 0))
+                secagg_client_index = int(config.get("secagg_client_index", 0))
+                secagg_total_clients = int(config.get("secagg_total_clients", 1))
+
+                quantized_deltas = quantize(updated_deltas, clip_range=1.0, range_max=1000000)
+
+                shapes = [q.shape for q in quantized_deltas]
+
+                all_masks = generate_zero_sum_masks(shapes, secagg_total_clients, secagg_seed)
+                my_mask = all_masks[secagg_client_index]
+
+                masked_parameters = []
+                for i in range(len(quantized_deltas)):
+                    masked_parameters.append(quantized_deltas[i].astype(np.int64) + my_mask[i].astype(np.int64))
+
+                return masked_parameters, len(train_loader.dataset), metrics
+
+            return updated_deltas, len(train_loader.dataset), metrics
 
         except Exception as e:
-            print(f"Client {self.partition_id} training failed: {e}")
-            import traceback
+            print(f"CLIENT EXCEPTION in partition {self.partition_id}: {e}")
             traceback.print_exc()
-            return (
-                get_weights(model),
-                0,
-                {
-                    "train_loss": 0.0,
-                    "val_loss": 0.0,
-                    "val_accuracy": 0.0,
-                    "epsilon": 0.0,
-                    "error": str(e),
-                    "device_type": device_profile.get("device_type", "unknown"),
-                    "dp_mode": dp_mode,
-                    "dropped": 0,
-                },
-            )
-
-        # Prepare metrics
-        metrics = {
-            "train_loss": float(results.get("train_loss") or 0.0),
-            "val_loss": float(results.get("val_loss") or 0.0),
-            "val_accuracy": float(results.get("val_accuracy") or 0.0),
-            "epsilon": float(results.get("epsilon") or 0.0),
-            "dp_mode": dp_mode,
-            "device_type": str(device_profile.get("device_type", "unknown")),
-            "resource_score": float(device_profile.get("resource_score", 0.0)),
-            "avg_sensitivity": float(avg_sensitivity),  # NEW!
-            "convergence_score": float(convergence_score),
-            "dropped": 0,
-        }
-
-        # Add per-layer DP metrics if applicable
-        if dp_config and dp_config.get("per_layer", False):
-            metrics["per_layer_dp"] = True
-            metrics["num_layers"] = len(dp_config.get("noise_multipliers", {}))
-            if "total_epsilon" in dp_config:
-                metrics["total_epsilon"] = float(dp_config["total_epsilon"])
-        else:
-            metrics["noise_multiplier"] = float(dp_config.get("noise_multiplier", 0.0) if dp_config else 0.0)
-
-        return get_weights(model), len(self.train_loader.dataset), metrics
+            raise e
 
     def evaluate(self, parameters, config):
-        """Evaluate global model on local test set."""
-        model = make_model(self.dataset_name)
-        model.to(self.device)
-        set_weights(model, parameters)
-
         try:
-            loss, accuracy = test(model, self.val_loader, self.device, self.dataset_name)
-        except Exception as e:
-            print(f"Client {self.partition_id} evaluation failed: {e}")
-            return 0.0, len(self.val_loader.dataset), {"accuracy": 0.0, "error": str(e)}
+            ds_name = str(self.run_config.get("dataset", "cifar10"))
+            _, val_loader = load_data(self.partition_id, self.num_partitions, 32, ds_name)
 
-        return float(loss), len(self.val_loader.dataset), {"accuracy": float(accuracy)}
+            device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+            model = make_model(ds_name).to(device)
+            self._set_parameters(model, parameters, device)
+
+            loss, accuracy = test(model, val_loader, device)
+
+            return float(loss), len(val_loader.dataset), {"accuracy": float(accuracy)}
+        except Exception as e:
+            print(f"CLIENT EVAL EXCEPTION: {e}")
+            raise e
+
+    def _set_parameters(self, model, parameters, device):
+        """Sets model parameters from a list of NumPy arrays."""
+        params_dict = zip(model.state_dict().keys(), parameters)
+        state_dict = {}
+        for k, v in params_dict:
+            tensor = torch.from_numpy(v).to(device=device, dtype=model.state_dict()[k].dtype)
+            state_dict[k] = tensor.view(model.state_dict()[k].shape)
+        model.load_state_dict(state_dict, strict=True)
+
+    def _get_parameters(self, model):
+        """Returns model parameters as a list of NumPy arrays."""
+        return [val.cpu().numpy() for _, val in model.state_dict().items()]
 
 
 def client_fn(context: Context):
-    """Create client instance with configuration from context.
-
-    Args:
-        context: Flower context with node and run configuration
-
-    Returns:
-        ClientApp instance
-    """
-    partition_id = int(context.node_config["partition-id"])
-    num_partitions = int(context.node_config["num-partitions"])
-    batch_size = int(context.run_config.get("batch-size", 32))
-    dataset_name = str(context.run_config.get("dataset", "cifar10"))
-    local_epochs = int(context.run_config.get("local-epochs", 2))
-    learning_rate = float(context.run_config.get("learning-rate", 0.001))
-    total_rounds = int(context.run_config.get("num-server-rounds", 10))
-    device = str(context.run_config.get("device", "auto"))
-
-    train_loader, val_loader = load_data(
-        partition_id, num_partitions, batch_size, dataset_name
-    )
-
-    return QPrivIoTClient(
-        train_loader=train_loader,
-        val_loader=val_loader,
-        partition_id=partition_id,
-        local_epochs=local_epochs,
-        learning_rate=learning_rate,
-        dataset_name=dataset_name,
-        total_rounds=total_rounds,
-        device=device,
-    ).to_client()
+    return QPrivIoTClient(context).to_client()
 
 
-app = ClientApp(client_fn=client_fn, mods=[secaggplus_mod])
+app = ClientApp(client_fn=client_fn)

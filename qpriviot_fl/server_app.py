@@ -1,406 +1,264 @@
-"""
-Flower server with SecAgg, convergence tracking, and adaptive privacy - SENSITIVITY ENABLED.
-"""
-from logging import INFO, WARNING
-from typing import List, Tuple, Dict, Callable
+from __future__ import annotations
 
-import torch
-from flwr.common import Context, Metrics, ndarrays_to_parameters, parameters_to_ndarrays, log
-from flwr.server import Grid, LegacyContext, ServerApp, ServerConfig
-from flwr.server.strategy import FedAvg
-from flwr.server.workflow import DefaultWorkflow, SecAggPlusWorkflow
+import json
+import os
+from typing import List, Optional
 
-from qpriviot_fl.task import make_model, get_weights, ConvergenceTracker
-from qpriviot_fl.test.metrics import MetricsLogger, plot_comprehensive_results
-from qpriviot_fl.privacy import PrivacyAccountant
 import numpy as np
+from flwr.common import (
+    Context,
+    ndarrays_to_parameters,
+    parameters_to_ndarrays,
+    FitIns,
+    Parameters
+)
+from flwr.server import ServerApp, ServerConfig, ServerAppComponents
+from flwr.server.client_manager import ClientManager
+from flwr.server.strategy import FedAvg
+from flwr.server.client_proxy import ClientProxy
+
+from qpriviot_fl.privacy_utils import RenyiPrivacyAccountant, dequantize
+from qpriviot_fl.task import make_model
 
 
-def set_random_seeds(seed: int = 42):
-    """Set all random seeds for reproducibility."""
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    log(INFO, f"Random seeds set to {seed}")
+class ProgressivePrivacyStrategy(FedAvg):
+    def __init__(self,
+                 results_file="results.json",
+                 model_file="global_model.npz",
+                 use_secagg=False,
+                 use_dp=False,
+                 use_adaptive_dp=False,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.results_file = os.path.abspath(results_file)
+        self.model_file = os.path.abspath(model_file)
+        self.use_secagg = use_secagg
+        self.use_dp = use_dp
+        self.use_adaptive_dp = use_adaptive_dp
+        self.loss_history = []
+        self.convergence_score = 0.0
+        self.accountant = RenyiPrivacyAccountant(target_epsilon=10.0, target_delta=1e-5)
+        self.experiments_log = []
+        self.secagg_seed = 1000
+        self._client_manager: ClientManager | None = None
+        self.current_parameters: Parameters | None = None
 
+    def configure_fit(self, server_round, parameters, client_manager: ClientManager):
 
-def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
-    """Aggregate metrics from clients weighted by dataset size.
+        self.current_parameters = parameters
 
-    Args:
-        metrics: List of (num_examples, metrics_dict) tuples
-                 num_examples = -1 indicates dropped client
-                 num_examples = 0 indicates error
+        self._client_manager = client_manager
 
-    Returns:
-        Aggregated metrics dictionary
-    """
-    if not metrics:
-        return {}
+        if self.use_secagg:
 
-    # Separate valid, dropped, and error clients
-    valid_metrics = [(num, m) for num, m in metrics if num > 0]
-    dropped_clients = [(num, m) for num, m in metrics if num == -1]
-    error_clients = [(num, m) for num, m in metrics if num == 0]
-
-    # Log dropout statistics
-    if dropped_clients:
-        dropped_types = [m.get("device_type", "unknown") for _, m in dropped_clients]
-        log(WARNING, f"Dropped clients: {len(dropped_clients)} (types: {set(dropped_types)})")
-
-    if error_clients:
-        log(WARNING, f"Error clients: {len(error_clients)}")
-
-    if not valid_metrics:
-        log(WARNING, "No valid metrics from any client this round")
-        return {
-            "num_dropped": len(dropped_clients),
-            "num_errors": len(error_clients),
-            "num_valid_clients": 0,
-        }
-
-    total_examples = sum(num for num, _ in valid_metrics)
-    aggregated = {}
-
-    # Aggregate model quality metrics (weighted by samples)
-    for key in ["accuracy", "val_accuracy", "train_loss", "val_loss"]:
-        values = [(num, m.get(key, 0)) for num, m in valid_metrics if key in m]
-        if values:
-            aggregated[key] = sum([num * val for num, val in values]) / total_examples
-
-    # Aggregate privacy metrics (epsilon) - sample-weighted
-    epsilons = [(num, m.get("epsilon")) for num, m in valid_metrics
-                if m.get("epsilon") is not None and m.get("epsilon") > 0]
-    if epsilons:
-        total_eps_weighted = sum(num * eps for num, eps in epsilons)
-        aggregated["avg_epsilon"] = total_eps_weighted / total_examples
-        aggregated["max_epsilon"] = max(eps for _, eps in epsilons)
-        aggregated["min_epsilon"] = min(eps for _, eps in epsilons)
-
-    # Aggregate sensitivity metrics (average across clients) - NEW!
-    sensitivities = [m.get("avg_sensitivity", 0) for _, m in valid_metrics
-                     if m.get("avg_sensitivity", 0) > 0]
-    if sensitivities:
-        aggregated["avg_sensitivity"] = sum(sensitivities) / len(sensitivities)
-        aggregated["max_sensitivity"] = max(sensitivities)
-        aggregated["min_sensitivity"] = min(sensitivities)
-
-    # Track DP modes used
-    dp_modes = {}
-    for _, m in valid_metrics:
-        mode = m.get("dp_mode", "unknown")
-        dp_modes[mode] = dp_modes.get(mode, 0) + 1
-    if dp_modes:
-        aggregated["dp_modes"] = dp_modes
-
-    # Track per-layer DP usage
-    per_layer_count = sum(1 for _, m in valid_metrics if m.get("per_layer_dp", False))
-    if per_layer_count > 0:
-        aggregated["per_layer_dp_clients"] = per_layer_count
-
-    aggregated["num_valid_clients"] = len(valid_metrics)
-    aggregated["num_dropped"] = len(dropped_clients)
-    aggregated["num_errors"] = len(error_clients)
-    aggregated["total_clients_attempted"] = len(metrics)
-
-    return aggregated
-
-
-def compute_resource_score(metrics: List[Tuple[int, Metrics]]) -> float:
-    """Compute average resource utilization score from client device profiles."""
-    valid_metrics = [(num, m) for num, m in metrics if num > 0]
-    if not valid_metrics:
-        return 0.5  # Default moderate score
-
-    # Track client statistics
-    num_valid = len(valid_metrics)
-    total_attempted = len(metrics)
-
-    # For now, use a heuristic based on client participation
-    participation_rate = num_valid / max(1, total_attempted)
-
-    # Higher participation = better resources
-    import random
-    random.seed(len(metrics))  # Deterministic variation
-    variation = random.uniform(-0.2, 0.2)
-    resource_score = max(0.0, min(1.0, participation_rate + variation))
-
-    return resource_score
-
-
-def create_fit_config_fn(
-        convergence_tracker: ConvergenceTracker,
-        use_adaptive_dp: bool,
-        use_dp: bool,
-        target_epsilon: float,  # NEW parameter!
-) -> Callable[[int], Dict]:
-    """Create fit_config function with closure over trackers."""
-
-    def fit_config(server_round: int) -> Dict:
-        """Send dynamic config to clients each round."""
-        convergence_score = convergence_tracker.get_convergence_score()
-
-        config = {
-            "convergence_score": float(convergence_score),
-            "current_round": int(server_round - 1),
-            "use_dp": bool(use_dp),
-            "use_adaptive_dp": bool(use_adaptive_dp),
-            "target_epsilon": float(target_epsilon),  # NEW! Pass to clients
-        }
-        return config
-
-    return fit_config
-
-
-def create_fit_metrics_aggregation_fn(
-        convergence_tracker: ConvergenceTracker,
-        privacy_accountant: PrivacyAccountant,
-        metrics_logger: MetricsLogger,
-) -> Callable[[List[Tuple[int, Metrics]]], Metrics]:
-    """Create fit_metrics_aggregation function with closure over trackers."""
-
-    def fit_metrics_aggregation(metrics: List[Tuple[int, Metrics]]) -> Metrics:
-        """Aggregate fit metrics and update trackers."""
-        aggregated = weighted_average(metrics)
-
-        # Update convergence tracker only if we have valid loss data
-        if "val_loss" in aggregated and aggregated["val_loss"] is not None:
-            convergence_tracker.update(aggregated["val_loss"])
-
-        # Update privacy accountant only if epsilon was reported
-        if "avg_epsilon" in aggregated and aggregated["avg_epsilon"] is not None:
-            privacy_accountant.add_round(aggregated["avg_epsilon"])
+            clients = client_manager.sample(
+                num_clients=client_manager.num_available(),
+                min_num_clients=1
+            )
         else:
-            log(WARNING, "No epsilon metrics reported from clients this round")
 
-        convergence_score = convergence_tracker.get_convergence_score()
-        resource_score = compute_resource_score(metrics)
+            client_instructions = super().configure_fit(server_round, parameters, client_manager)
+            clients = [instr[0] for instr in client_instructions]
 
-        round_metrics = {
-            **aggregated,
-            "convergence_score": convergence_score,
-            "resource_score": resource_score,
+        if not clients:
+            return []
+
+        if len(self.loss_history) >= 2:
+            recent = self.loss_history[-3:]
+            mean_loss = np.mean(recent)
+            if mean_loss > 0:
+                cv = np.std(recent).item() / mean_loss.item()
+                self.convergence_score = max(0.0, min(1.0, 1.0 - (cv * 4)))
+
+        dp_status = "Adaptive" if self.use_adaptive_dp else ("Fixed" if self.use_dp else "None")
+        secagg_status = "Active" if self.use_secagg and len(clients) > 0 else "Off"
+        print(
+            f"\n--- Round {server_round} [DP: {dp_status}, SecAgg: {secagg_status}, Conv: {self.convergence_score:.2f}] ---")
+
+        new_instructions = []
+        total_clients = len(clients)
+
+        for idx, client_proxy in enumerate(clients):
+            config = {
+
+                "use_secagg": self.use_secagg,
+                "use_dp": self.use_dp,
+                "use_adaptive_dp": self.use_adaptive_dp,
+
+                "convergence_score": self.convergence_score,
+                "round": server_round
+            }
+
+            if self.use_secagg:
+                config["secagg_seed"] = self.secagg_seed + server_round
+                config["secagg_client_index"] = idx
+                config["secagg_total_clients"] = total_clients
+
+            fit_ins = FitIns(parameters, config)
+            new_instructions.append((client_proxy, fit_ins))
+
+        return new_instructions
+
+    def aggregate_fit(self, server_round, results, failures):
+        if not results:
+            print("  ⚠️ No clients returned results. Skipping aggregation.")
+            return None, {}
+
+        total_available_clients = 1
+        if self._client_manager:
+            total_available_clients = self._client_manager.num_available()
+
+        if self.current_parameters is None:
+            print(
+                "  🛑 Error: Global model parameters (self.current_parameters) are not available. Cannot proceed with aggregation."
+            )
+            return None, {}
+
+        current_parameters_ndarrays = parameters_to_ndarrays(self.current_parameters)
+
+        is_secagg_round = results[0][1].metrics.get("secagg_active", False)
+
+        averaged_delta: List[np.ndarray]
+
+        if is_secagg_round:
+            print("  🔓 Aggregating Masked Updates (SecAgg: Summing Integers)...")
+
+            first_res_params = parameters_to_ndarrays(results[0][1].parameters)
+            aggregated_integers_delta = [
+                arr.astype(np.int64).copy() for arr in first_res_params
+            ]
+
+            for _, res in results[1:]:
+                masked_delta_params = parameters_to_ndarrays(res.parameters)
+                for i in range(len(masked_delta_params)):
+                    aggregated_integers_delta[i] += masked_delta_params[i].astype(np.int64)
+
+            final_floats_delta = dequantize(aggregated_integers_delta, clip_range=1.0, range_max=1000000)
+
+            num_participants = len(results)
+            averaged_delta = [
+                d / num_participants for d in final_floats_delta
+            ]
+
+        else:
+
+            print("  ➡️ Aggregating Deltas (Standard FedAvg)...")
+
+            num_participants = len(results)
+
+            deltas = parameters_to_ndarrays(results[0][1].parameters)
+
+            for _, res in results[1:]:
+                client_deltas = parameters_to_ndarrays(res.parameters)
+                for i in range(len(deltas)):
+                    deltas[i] += client_deltas[i]
+
+            averaged_delta = [d / num_participants for d in deltas]
+
+        new_global_params_ndarrays = [
+            current_parameters_ndarrays[i] + averaged_delta[i]
+            for i in range(len(current_parameters_ndarrays))
+        ]
+        agg_params = ndarrays_to_parameters(new_global_params_ndarrays)
+
+        avg_noise = np.mean([r.metrics.get("avg_noise", 0) for _, r in results])
+        sampling_rate = len(results) / total_available_clients
+        dp_mode = results[0][1].metrics.get("dp_mode", "None")
+
+        if dp_mode != "None":
+            self.accountant.add_round(noise_multiplier=float(avg_noise), sampling_rate=sampling_rate)
+
+        current_epsilon = self.accountant.get_total_epsilon()
+
+        losses = [r.metrics["train_loss"] for _, r in results if "train_loss" in r.metrics]
+        avg_loss = sum(losses) / len(losses) if losses else 0.0
+        self.loss_history.append(avg_loss)
+
+        eval_metrics = results[0][1].metrics.get("evaluation_metrics", {})
+        val_accuracy = eval_metrics.get("accuracy", 0.0)
+        val_loss = eval_metrics.get("loss", 0.0)
+        clip_norm = np.mean([r.metrics.get("clip_norm", 0.0) for _, r in results])
+        avg_sensitivity = np.mean([r.metrics.get("avg_sensitivity", 0.0) for _, r in results])
+
+        print(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
+
+        record = {
+            "round": server_round,
+            "avg_loss": avg_loss,
+            "val_accuracy": val_accuracy,
+            "val_loss": val_loss,
+            "convergence_score": self.convergence_score,
+            "total_epsilon": current_epsilon,
+            "avg_latency": np.mean([r.metrics.get("client_latency", 0) for _, r in results]),
+            "avg_resource": np.mean([r.metrics.get("resource_score", 0) for _, r in results]),
+            "clip_norm": clip_norm,
+            "avg_sensitivity": avg_sensitivity,
+            "secagg_active": is_secagg_round,
+            "dp_mode": dp_mode,
         }
+        self.experiments_log.append(record)
+        self._save(new_global_params_ndarrays)
 
-        metrics_logger.log_round(round_metrics)
+        return agg_params, {}
 
-        # Log key metrics
-        if "val_accuracy" in aggregated:
-            log(INFO, f"Val Accuracy: {aggregated['val_accuracy'] * 100:.2f}%")
-        if "val_loss" in aggregated:
-            log(INFO, f"Val Loss: {aggregated['val_loss']:.4f}")
-        if "avg_epsilon" in aggregated:
-            log(
-                INFO,
-                f"Privacy ε: {aggregated['avg_epsilon']:.4f} "
-                f"[{aggregated['min_epsilon']:.4f}, {aggregated['max_epsilon']:.4f}]",
-            )
-        if "avg_sensitivity" in aggregated:  # NEW!
-            log(
-                INFO,
-                f"Sensitivity: {aggregated['avg_sensitivity']:.4f} "
-                f"[{aggregated.get('min_sensitivity', 0):.4f}, "
-                f"{aggregated.get('max_sensitivity', 0):.4f}]",
-            )
+    def _save(self, aggregated_model_ndarrays: List[np.ndarray]):
+        """Saves the results log and the aggregated model parameters."""
 
-        log(INFO, f"Convergence Score: {convergence_score:.4f}")
-        log(INFO, f"Resource Score: {resource_score:.4f}")
+        with open(self.results_file, "w") as f:
+            json.dump({"rounds": self.experiments_log}, f, indent=2)
 
-        # Log client participation
-        num_valid = aggregated.get("num_valid_clients", 0)
-        num_dropped = aggregated.get("num_dropped", 0)
-        num_errors = aggregated.get("num_errors", 0)
-        num_total = aggregated.get("total_clients_attempted", 0)
-        if num_total > 0:
-            log(
-                INFO,
-                f"Clients: {num_valid} valid, {num_dropped} dropped, "
-                f"{num_errors} errors (total: {num_total})",
-            )
-
-        # Log per-layer DP usage
-        if "per_layer_dp_clients" in aggregated:
-            log(
-                INFO,
-                f"Per-layer DP: {aggregated['per_layer_dp_clients']}/{num_valid} clients",
-            )
-
-        # Log DP modes distribution
-        if "dp_modes" in aggregated:
-            modes_str = ", ".join(f"{k}:{v}" for k, v in aggregated["dp_modes"].items())
-            log(INFO, f"DP Modes: {modes_str}")
-
-        return aggregated
-
-    return fit_metrics_aggregation
+        print(f"  💾 Saving global model to {self.model_file}...")
+        np.savez(self.model_file, *aggregated_model_ndarrays)
 
 
-app = ServerApp()
+def server_fn(context: Context):
+    """Server function - returns ServerAppComponents."""
 
+    num_rounds = context.run_config.get("num-server-rounds", 10)
+    dataset = context.run_config.get("dataset", "cifar10")
 
-def create_secagg_workflow(context: Context):
-    """Create SecAggPlus workflow with validated configuration."""
-    use_secagg = bool(context.run_config.get("use-secagg", True))
+    use_secagg = context.run_config.get("use-secagg", False)
+    use_dp = context.run_config.get("use-dp", False)
+    use_adaptive_dp = context.run_config.get("use-adaptive-dp", False)
 
-    if not use_secagg:
-        log(WARNING, "SecAgg DISABLED - using standard aggregation (NOT privacy-preserving)")
-        return None
+    filename_parts = ["results"]
 
-    try:
-        num_shares = int(context.run_config.get("num-shares", 3))
-        reconstruction_threshold = int(context.run_config.get("reconstruction-threshold", 2))
-        max_weight = int(context.run_config.get("max-weight", 10000))
-
-        # Validate SecAgg configuration
-        if reconstruction_threshold > num_shares:
-            log(
-                WARNING,
-                f"reconstruction_threshold ({reconstruction_threshold}) > num_shares ({num_shares}). "
-                f"Adjusting to {num_shares}",
-            )
-            reconstruction_threshold = num_shares
-
-        if reconstruction_threshold < 1:
-            log(WARNING, "reconstruction_threshold < 1. Setting to 1")
-            reconstruction_threshold = 1
-
-        log(INFO, "SecAggPlus Configuration:")
-        log(INFO, f"  - num_shares: {num_shares}")
-        log(INFO, f"  - reconstruction_threshold: {reconstruction_threshold}")
-        log(INFO, f"  - max_weight: {max_weight}")
-        log(INFO, "Secure aggregation enabled - model updates encrypted")
-
-        return SecAggPlusWorkflow(
-            num_shares=num_shares,
-            reconstruction_threshold=reconstruction_threshold,
-            max_weight=max_weight,
-        )
-
-    except Exception as e:
-        log(WARNING, f"Failed to create SecAggPlus: {e}. Falling back to standard aggregation")
-        return None
-
-
-@app.main()
-def main(grid: Grid, context: Context) -> None:
-    """Main server logic with adaptive privacy and convergence tracking."""
-    # Configuration
-    dataset_name = str(context.run_config.get("dataset", "cifar10"))
-    num_rounds = int(context.run_config["num-server-rounds"])
-    use_secagg = bool(context.run_config.get("use-secagg", True))
-    use_dp = bool(context.run_config.get("use-dp", True))
-    use_adaptive_dp = bool(context.run_config.get("use-adaptive-dp", True))
-    target_epsilon = float(context.run_config.get("target-epsilon", 10.0))
-
-    random_seed = int(context.run_config.get("random-seed", 42))
-    set_random_seeds(random_seed)  # Set seeds BEFORE creating model!
-
-    log(INFO, "=" * 60)
-    log(INFO, "QPrivIoT-FL Server Configuration")
-    log(INFO, "=" * 60)
-    log(INFO, f"Dataset: {dataset_name}")
-    log(INFO, f"Rounds: {num_rounds}")
-    log(INFO, f"Differential Privacy: {use_dp}")
-    log(INFO, f"Adaptive DP: {use_adaptive_dp}")
-    log(INFO, f"Target Epsilon: {target_epsilon}")
-    log(INFO, f"Secure Aggregation: {use_secagg}")
-    log(INFO, f"Random Seed: {random_seed}")
-    log(INFO, "=" * 60)
-
-
-
-    # Initialize trackers
-    convergence_tracker = ConvergenceTracker(window_size=5, threshold=0.01)
-    privacy_accountant = PrivacyAccountant(target_epsilon=target_epsilon, target_delta=1e-5)
-    metrics_logger = MetricsLogger()
-
-    # Initialize global model
-    global_model = make_model(dataset_name)
-    initial_params = ndarrays_to_parameters(get_weights(global_model))
-
-    # Log initial model state for verification
-    initial_loss_estimate = sum([p.sum() for p in get_weights(global_model)]) / len(get_weights(global_model))
-    log(INFO, f"Initial model checksum: {initial_loss_estimate:.6f} (should be same across experiments)")
-
-    # Create strategy
-    strategy = FedAvg(
-        fraction_fit=float(context.run_config.get("fraction-fit", 0.8)),
-        fraction_evaluate=float(context.run_config.get("fraction-evaluate", 0.5)),
-        min_fit_clients=int(context.run_config.get("min-fit-clients", 3)),
-        min_available_clients=int(context.run_config.get("min-available-clients", 3)),
-        evaluate_metrics_aggregation_fn=weighted_average,
-        fit_metrics_aggregation_fn=create_fit_metrics_aggregation_fn(
-            convergence_tracker, privacy_accountant, metrics_logger
-        ),
-        on_fit_config_fn=create_fit_config_fn(
-            convergence_tracker, use_adaptive_dp, use_dp, target_epsilon  # Pass target_epsilon!
-        ),
-        initial_parameters=initial_params,
-    )
-
-    # Create workflow
-    fit_workflow = create_secagg_workflow(context)
-    workflow = DefaultWorkflow(fit_workflow=fit_workflow)
-
-    # Run federated learning
-    legacy_context = LegacyContext(
-        context=context,
-        config=ServerConfig(num_rounds=num_rounds),
-        strategy=strategy,
-    )
-
-    log(INFO, "Starting federated training...")
-    try:
-        workflow(grid, legacy_context)
-    except Exception as e:
-        log(WARNING, f"Training interrupted: {e}")
-        import traceback
-        traceback.print_exc()
-
-    # Print final results
-    log(INFO, "=" * 80)
-    log(INFO, "TRAINING COMPLETE!")
-    log(INFO, "=" * 80)
-
-    privacy_report = privacy_accountant.get_privacy_report()
-    log(INFO, f"Total Privacy Spent: {privacy_report['total_epsilon']:.4f}")
-    log(INFO, f"Rounds Completed: {privacy_report['rounds_completed']}")
-    if privacy_report["rounds_completed"] > 0:
-        log(INFO, f"Average per Round: {privacy_report['avg_epsilon_per_round']:.4f}")
-    log(INFO, f"Remaining Budget: {privacy_report['remaining_budget']:.4f}")
-
-    if privacy_report["total_epsilon"] > privacy_report.get("target_epsilon", float("inf")):
-        log(WARNING, "Privacy budget EXCEEDED target!")
+    if use_adaptive_dp:
+        filename_parts.append("adaptive_dp")
+    elif use_dp:
+        filename_parts.append("uniform_dp")
     else:
-        log(INFO, "Privacy budget within target")
+        filename_parts.append("no_dp")
 
-    # Save model
-    if hasattr(strategy, "parameters") and strategy.parameters is not None:
-        try:
-            final_ndarrays = parameters_to_ndarrays(strategy.parameters)
-            param_keys = list(global_model.state_dict().keys())
-            state_dict = {k: torch.tensor(v) for k, v in zip(param_keys, final_ndarrays)}
-            model_path = f"final_model_{dataset_name}.pt"
-            torch.save(state_dict, model_path)
-            log(INFO, f"Model saved to {model_path}")
-        except Exception as e:
-            log(WARNING, f"Could not save model: {e}")
+    if use_secagg:
+        filename_parts.append("secagg")
 
-    # Save metrics
-    all_metrics = metrics_logger.get_all_metrics()
-    if len(all_metrics) > 0:
-        try:
-            if not use_dp:
-                metrics_path = "results_no_dp.json"
-            elif use_adaptive_dp:
-                metrics_path = "results_adaptive_dp.json"
-            else:
-                metrics_path = "results_uniform_dp.json"
+    results_file_name = "_".join(filename_parts) + ".json"
 
-            metrics_logger.save_to_file(metrics_path)
-            log(INFO, f"Metrics saved to {metrics_path}")
-        except Exception as e:
-            log(WARNING, f"Could not save results: {e}")
+    model_file_name = context.run_config.get("model-output-file", "global_model.npz")
 
-    log(INFO, "=" * 60)
+    model = make_model(dataset)
+
+    init_parameters_ndarrays = [v.detach().cpu().numpy() for v in model.state_dict().values()]
+    init_parameters = ndarrays_to_parameters(init_parameters_ndarrays)
+
+    strategy = ProgressivePrivacyStrategy(
+        results_file=results_file_name,
+        model_file=model_file_name,
+        use_secagg=use_secagg,
+        use_dp=use_dp,
+        use_adaptive_dp=use_adaptive_dp,
+        fraction_fit=context.run_config.get("fraction-fit", 1.0),
+        fraction_evaluate=context.run_config.get("fraction-evaluate", 1.0),
+        min_fit_clients=context.run_config.get("min-fit-clients", 1),
+        min_available_clients=context.run_config.get("min-available-clients", 1),
+        initial_parameters=init_parameters,
+    )
+
+    return ServerAppComponents(
+        strategy=strategy,
+        config=ServerConfig(num_rounds=num_rounds),
+    )
+
+
+app = ServerApp(server_fn=server_fn)
