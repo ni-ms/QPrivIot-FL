@@ -1,267 +1,421 @@
+"""
+Data plotting script for research paper visualizations.
+
+This script:
+1. Loads experimental results from three configuration files.
+2. Creates comprehensive comparative visualizations (12 subplots) for the paper.
+3. Handles missing metrics gracefully by using a default value (0.0).
+4. Exits gracefully if no data files are found.
+"""
+
 import json
 import numpy as np
-import matplotlib
-
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
+import matplotlib.gridspec as gridspec
 from typing import Dict, List
+import os
+import math
 
-plt.rcParams['figure.figsize'] = (14, 10)
-plt.rcParams['font.size'] = 11
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['axes.labelsize'] = 12
-plt.rcParams['axes.titlesize'] = 13
-plt.rcParams['xtick.labelsize'] = 10
-plt.rcParams['ytick.labelsize'] = 10
-plt.rcParams['legend.fontsize'] = 10
-plt.rcParams['figure.titlesize'] = 14
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.size': 12,
+    'axes.labelsize': 14,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 11,
+    'figure.titlesize': 18,
+    'lines.linewidth': 2.5,
+    'lines.markersize': 8
+})
+
+COLORS = {
+    'no_dp': '#2c3e50',  # Dark blue-gray (No DP)
+    'uniform': '#e74c3c',  # Red (Uniform DP)
+    'adaptive': '#27ae60'  # Green (QPrivIoT)
+}
+
+MARKERS = {
+    'no_dp': 'o',
+    'uniform': 's',
+    'adaptive': '^'
+}
 
 
-def load_results(no_dp_path: str, uniform_dp_path: str, adaptive_dp_path: str):
-    """Load experiment results from JSON files."""
-    with open(no_dp_path, 'r') as f:
-        no_dp = json.load(f)
-    with open(uniform_dp_path, 'r') as f:
-        uniform_dp = json.load(f)
-    with open(adaptive_dp_path, 'r') as f:
-        adaptive_dp = json.load(f)
-
-    return no_dp, uniform_dp, adaptive_dp
-
-
-def plot_paper_figures(no_dp: List[Dict], uniform_dp: List[Dict], adaptive_dp: List[Dict],
-                       save_path: str = "graphs.png"):
+def load_data(filename):
     """
-    Create publication-ready figures for QPrivIoT-FL paper.
+    Load data from JSON file. Exits gracefully if file is missing.
 
     Args:
-        no_dp: Results from baseline (no differential privacy)
-        uniform_dp: Results from uniform DP
-        adaptive_dp: Results from adaptive per-layer DP
-        save_path: Where to save the figure
+        filename: Path to JSON file
+
+    Returns:
+        Dictionary with rounds data or empty dict if file missing
     """
+    if os.path.exists(filename):
+        print(f"✅ Loading {filename}...")
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
 
-    fig = plt.figure(figsize=(16, 10))
-    gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3)
+            if isinstance(data, list):
+                result = {"rounds": data}
+            elif isinstance(data, dict) and "rounds" in data:
+                result = data
+            else:
+                result = {"rounds": []}
 
-    rounds = list(range(1, len(no_dp) + 1))
+            num_rounds = len(result.get('rounds', []))
+            print(f"   Loaded {num_rounds} rounds")
 
-    # ========================================================================
-    # FIGURE 1: Model Accuracy Progress (Main Result)
-    # ========================================================================
-    ax1 = fig.add_subplot(gs[0, :2])
+            if num_rounds > 0:
+                sample = result['rounds'][0]
+                print(f"   Available metrics: {list(sample.keys())}")
 
-    no_dp_acc = [m['val_accuracy'] * 100 for m in no_dp]
-    uniform_acc = [m['val_accuracy'] * 100 for m in uniform_dp]
-    adaptive_acc = [m['val_accuracy'] * 100 for m in adaptive_dp]
+            return result
 
-    ax1.plot(rounds, no_dp_acc, 'o-', linewidth=2.5, markersize=8,
-             color='#2E86AB', label='No DP (Baseline)', alpha=0.9)
-    ax1.plot(rounds, uniform_acc, 's-', linewidth=2.5, markersize=8,
-             color='#A23B72', label='Uniform DP', alpha=0.9)
-    ax1.plot(rounds, adaptive_acc, '^-', linewidth=2.5, markersize=8,
-             color='#F18F01', label='QPrivIoT-FL (Adaptive)', alpha=0.9)
-
-    ax1.set_xlabel('Training Round', fontweight='bold')
-    ax1.set_ylabel('Validation Accuracy (%)', fontweight='bold')
-    ax1.set_title('(a) Model Accuracy Across Federated Rounds', fontweight='bold', loc='left')
-    ax1.legend(loc='lower right', frameon=True, shadow=True)
-    ax1.grid(True, alpha=0.3, linestyle='--')
-    ax1.set_xlim(0.5, len(rounds) + 0.5)
-    ax1.set_ylim(0, max(no_dp_acc) * 1.1)
-
-    # Add annotations for final values
-    ax1.annotate(f'{no_dp_acc[-1]:.1f}%',
-                 xy=(rounds[-1], no_dp_acc[-1]),
-                 xytext=(10, 0), textcoords='offset points',
-                 fontsize=9, fontweight='bold', color='#2E86AB')
-    ax1.annotate(f'{uniform_acc[-1]:.1f}%',
-                 xy=(rounds[-1], uniform_acc[-1]),
-                 xytext=(10, -10), textcoords='offset points',
-                 fontsize=9, fontweight='bold', color='#A23B72')
-    ax1.annotate(f'{adaptive_acc[-1]:.1f}%',
-                 xy=(rounds[-1], adaptive_acc[-1]),
-                 xytext=(10, 5), textcoords='offset points',
-                 fontsize=9, fontweight='bold', color='#F18F01')
-
-    # ========================================================================
-    # FIGURE 2: Training Loss
-    # ========================================================================
-    ax2 = fig.add_subplot(gs[0, 2])
-
-    no_dp_loss = [m['val_loss'] for m in no_dp]
-    uniform_loss = [m['val_loss'] for m in uniform_dp]
-    adaptive_loss = [m['val_loss'] for m in adaptive_dp]
-
-    ax2.plot(rounds, no_dp_loss, 'o-', linewidth=2, markersize=6,
-             color='#2E86AB', label='No DP', alpha=0.8)
-    ax2.plot(rounds, uniform_loss, 's-', linewidth=2, markersize=6,
-             color='#A23B72', label='Uniform DP', alpha=0.8)
-    ax2.plot(rounds, adaptive_loss, '^-', linewidth=2, markersize=6,
-             color='#F18F01', label='Adaptive DP', alpha=0.8)
-
-    ax2.set_xlabel('Round', fontweight='bold')
-    ax2.set_ylabel('Validation Loss', fontweight='bold')
-    ax2.set_title('(b) Validation Loss', fontweight='bold', loc='left')
-    ax2.legend(loc='upper right', fontsize=9)
-    ax2.grid(True, alpha=0.3, linestyle='--')
-
-    # ========================================================================
-    # FIGURE 3: Privacy Budget Consumption
-    # ========================================================================
-    ax3 = fig.add_subplot(gs[1, 0])
-
-    # Calculate cumulative epsilon
-    uniform_eps_cumulative = []
-    adaptive_eps_cumulative = []
-    eps_sum_uniform = 0
-    eps_sum_adaptive = 0
-
-    for u, a in zip(uniform_dp, adaptive_dp):
-        eps_sum_uniform += u.get('avg_epsilon', 0)
-        eps_sum_adaptive += a.get('avg_epsilon', 0)
-        uniform_eps_cumulative.append(eps_sum_uniform)
-        adaptive_eps_cumulative.append(eps_sum_adaptive)
-
-    ax3.plot(rounds, uniform_eps_cumulative, 's-', linewidth=2.5, markersize=7,
-             color='#A23B72', label='Uniform DP', alpha=0.9)
-    ax3.plot(rounds, adaptive_eps_cumulative, '^-', linewidth=2.5, markersize=7,
-             color='#F18F01', label='Adaptive DP', alpha=0.9)
-
-    # Add target line
-    target_epsilon = 10.0
-    ax3.axhline(y=target_epsilon, color='red', linestyle='--', linewidth=2,
-                label=f'Target ε = {target_epsilon}', alpha=0.7)
-
-    ax3.set_xlabel('Training Round', fontweight='bold')
-    ax3.set_ylabel('Cumulative ε', fontweight='bold')
-    ax3.set_title('(c) Privacy Budget Consumption', fontweight='bold', loc='left')
-    ax3.legend(loc='upper left', fontsize=9)
-    ax3.grid(True, alpha=0.3, linestyle='--')
-    ax3.set_xlim(0.5, len(rounds) + 0.5)
-
-    # ========================================================================
-    # FIGURE 4: Privacy-Utility Tradeoff (Scatter)
-    # ========================================================================
-    ax4 = fig.add_subplot(gs[1, 1])
-
-    # Calculate final metrics
-    methods = ['No DP', 'Uniform DP', 'Adaptive DP']
-    epsilons = [float('inf'), uniform_eps_cumulative[-1], adaptive_eps_cumulative[-1]]
-    accuracies = [no_dp_acc[-1], uniform_acc[-1], adaptive_acc[-1]]
-    colors = ['#2E86AB', '#A23B72', '#F18F01']
-    markers = ['o', 's', '^']
-
-    for i, (method, eps, acc, color, marker) in enumerate(zip(methods, epsilons, accuracies, colors, markers)):
-        if eps == float('inf'):
-            # Plot No DP at far right
-            ax4.scatter([25], [acc], s=200, color=color, marker=marker,
-                        alpha=0.8, edgecolors='black', linewidths=1.5, label=method)
-            ax4.annotate(f'{method}\n{acc:.1f}%',
-                         xy=(25, acc), xytext=(-30, 10),
-                         textcoords='offset points', fontsize=9,
-                         bbox=dict(boxstyle='round,pad=0.3', facecolor=color, alpha=0.3))
-        else:
-            ax4.scatter([eps], [acc], s=200, color=color, marker=marker,
-                        alpha=0.8, edgecolors='black', linewidths=1.5, label=method)
-            ax4.annotate(f'{method}\n{acc:.1f}%\nε={eps:.1f}',
-                         xy=(eps, acc), xytext=(5, -20),
-                         textcoords='offset points', fontsize=9,
-                         bbox=dict(boxstyle='round,pad=0.3', facecolor=color, alpha=0.3))
-
-    ax4.set_xlabel('Total Privacy Cost (ε)', fontweight='bold')
-    ax4.set_ylabel('Final Accuracy (%)', fontweight='bold')
-    ax4.set_title('(d) Privacy-Utility Tradeoff', fontweight='bold', loc='left')
-    ax4.grid(True, alpha=0.3, linestyle='--')
-    ax4.set_xlim(-1, 27)
-    ax4.set_ylim(20, 60)
-
-    # ========================================================================
-    # FIGURE 5: Per-Layer Sensitivity (Your Innovation!)
-    # ========================================================================
-    ax5 = fig.add_subplot(gs[1, 2])
-
-    # Extract sensitivity data from a few representative rounds
-    rounds_to_show = [1, 5, 10]
-    sensitivities = {round_num: adaptive_dp[round_num - 1].get('avg_sensitivity', 0)
-                     for round_num in rounds_to_show}
-
-    x = np.arange(len(rounds_to_show))
-    width = 0.6
-
-    colors_gradient = ['#FFA07A', '#FF6347', '#DC143C']
-    bars = ax5.bar(x, [sensitivities[r] for r in rounds_to_show],
-                   width, color=colors_gradient, alpha=0.8, edgecolor='black', linewidth=1.2)
-
-    # Add value labels on bars
-    for bar, round_num in zip(bars, rounds_to_show):
-        height = bar.get_height()
-        ax5.text(bar.get_x() + bar.get_width() / 2., height,
-                 f'{height:.3f}',
-                 ha='center', va='bottom', fontsize=9, fontweight='bold')
-
-    ax5.set_xlabel('Training Round', fontweight='bold')
-    ax5.set_ylabel('Avg. Model Sensitivity', fontweight='bold')
-    ax5.set_title('(e) Model Parameter Sensitivity', fontweight='bold', loc='left')
-    ax5.set_xticks(x)
-    ax5.set_xticklabels([f'Round {r}' for r in rounds_to_show])
-    ax5.grid(True, alpha=0.3, linestyle='--', axis='y')
-    ax5.set_ylim(0, max(sensitivities.values()) * 1.2)
-
-    # ========================================================================
-    # Overall title
-    # ========================================================================
-    fig.suptitle('QPrivIoT-FL: Experimental Results on CIFAR-10',
-                 fontsize=16, fontweight='bold', y=0.98)
-
-    # Save figure
-    plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
-    print(f"figures saved to: {save_path}")
-    plt.close()
+        except Exception as e:
+            print(f"❌ Error loading {filename}: {e}")
+            return {"rounds": []}
+    else:
+        print(f"⚠️  File not found: {filename}. Skipping.")
+        return {"rounds": []}
 
 
-def print_summary_table(no_dp: List[Dict], uniform_dp: List[Dict], adaptive_dp: List[Dict]):
-    """Print a summary table for the paper."""
+def extract_metric(data, key, scale=1.0, cumsum=False, default_value=0.0):
+    """
+    Extract metric from data with proper error handling.
 
-    print("\n" + "=" * 80)
-    print("SUMMARY TABLE FOR PAPER")
-    print("=" * 80)
-    print()
-    print("| Method          | Final Acc | Total ε | Avg ε/Round | Improvement vs Uniform |")
-    print("|-----------------|-----------|---------|-------------|------------------------|")
+    Args:
+        data: Dictionary with 'rounds' key
+        key: Metric key to extract
+        scale: Scaling factor
+        cumsum: If True, return cumulative sum
+        default_value: Value to use if metric missing
 
-    no_dp_acc = no_dp[-1]['val_accuracy'] * 100
-    uniform_acc = uniform_dp[-1]['val_accuracy'] * 100
-    adaptive_acc = adaptive_dp[-1]['val_accuracy'] * 100
+    Returns:
+        List of metric values
+    """
+    rounds = data.get('rounds', [])
 
-    uniform_total_eps = sum([m.get('avg_epsilon', 0) for m in uniform_dp])
-    adaptive_total_eps = sum([m.get('avg_epsilon', 0) for m in adaptive_dp])
+    if not rounds:
+        return []
 
-    improvement = adaptive_acc - uniform_acc
+    values = []
+    for r in rounds:
+        val = r.get(key, default_value)
+        values.append(val * scale)
 
-    print(f"| No DP           | {no_dp_acc:5.1f}%    | ∞       | -           | -                      |")
-    print(
-        f"| Uniform DP      | {uniform_acc:5.1f}%    | {uniform_total_eps:5.1f}   | {uniform_total_eps / len(uniform_dp):5.2f}        | -                      |")
-    print(
-        f"| QPrivIoT-FL     | {adaptive_acc:5.1f}%    | {adaptive_total_eps:5.1f}   | {adaptive_total_eps / len(adaptive_dp):5.2f}        | +{improvement:4.1f} pp ({improvement / uniform_acc * 100:.1f}%)        |")
-    print()
-    print("=" * 80)
+    if cumsum and values:
+        cumulative_sum = [sum(values[:i + 1]) for i in range(len(values))]
+        return cumulative_sum
+
+    return values
 
 
-# ============================================================================
-# MAIN EXECUTION
-# ============================================================================
+def plot_all():
+    """
+    Create comprehensive visualization with 12 subplots from loaded data.
+    """
+    print("\n" + "=" * 60)
+    print("🎨 Creating Paper Figures")
+    print("=" * 60 + "\n")
+
+    no_dp = load_data("results_no_dp.json")
+    uniform = load_data("results_uniform_dp.json")
+    adaptive = load_data("results_adaptive_dp.json")
+
+    lens = [len(d.get('rounds', [])) for d in [no_dp, uniform, adaptive]]
+
+    if max(lens) == 0:
+        print("\n❌ No data available in any file!")
+        print("   Please ensure results files (results_no_dp.json, etc.) exist.")
+        return
+
+    max_rounds = max(lens)
+    print(f"\n📈 Creating plots for up to {max_rounds} rounds...")
+
+    fig = plt.figure(figsize=(24, 20))
+
+    gs = gridspec.GridSpec(4, 3, height_ratios=[1, 1, 1, 1.2], hspace=0.3, wspace=0.3)
+
+    ax1 = fig.add_subplot(gs[0, 0])
+    for name, data, key in [('No DP', no_dp, 'no_dp'),
+                            ('Uniform DP', uniform, 'uniform'),
+                            ('QPrivIoT (Ours)', adaptive, 'adaptive')]:
+
+        vals = extract_metric(data, 'val_accuracy', scale=100)
+        if vals:
+            rounds = range(1, len(vals) + 1)
+            ax1.plot(rounds, vals, marker=MARKERS[key], color=COLORS[key],
+                     label=name, linewidth=2.5, markersize=8)
+
+    ax1.set_xlabel('Round')
+    ax1.set_ylabel('Accuracy (%)')
+    ax1.set_title('(a) Global Model Accuracy', fontweight='bold')
+    ax1.legend(loc='lower right')
+    ax1.grid(True, alpha=0.3)
+    ax1.set_ylim([0, 100])
+
+    ax2 = fig.add_subplot(gs[0, 1])
+    for name, data, key in [('No DP', no_dp, 'no_dp'),
+                            ('Uniform DP', uniform, 'uniform'),
+                            ('QPrivIoT (Ours)', adaptive, 'adaptive')]:
+
+        vals = extract_metric(data, 'val_loss')
+        if vals:
+            rounds = range(1, len(vals) + 1)
+            ax2.plot(rounds, vals, marker=MARKERS[key], color=COLORS[key],
+                     label=name, linewidth=2.5, markersize=8)
+
+    ax2.set_xlabel('Round')
+    ax2.set_ylabel('Validation Loss')
+    ax2.set_title('(b) Convergence Stability', fontweight='bold')
+    ax2.legend(loc='upper right')
+    ax2.grid(True, alpha=0.3)
+
+    ax3 = fig.add_subplot(gs[0, 2])
+
+    uni_eps = extract_metric(uniform, 'total_epsilon')
+    adapt_eps = extract_metric(adaptive, 'total_epsilon')
+
+    if uni_eps:
+        ax3.plot(range(1, len(uni_eps) + 1), uni_eps, marker=MARKERS['uniform'],
+                 color=COLORS['uniform'], label='Uniform DP', linewidth=2.5, markersize=8)
+    if adapt_eps:
+        ax3.plot(range(1, len(adapt_eps) + 1), adapt_eps, marker=MARKERS['adaptive'],
+                 color=COLORS['adaptive'], label='QPrivIoT', linewidth=2.5, markersize=8)
+
+    ax3.axhline(y=10.0, color='black', linestyle=':', linewidth=2, label='Budget (ε=10)')
+    ax3.set_xlabel('Round')
+    ax3.set_ylabel('Privacy Cost (ε)')
+    ax3.set_title('(c) Privacy Budget Consumption', fontweight='bold')
+    ax3.legend(loc='lower right')
+    ax3.grid(True, alpha=0.3)
+
+    ax4 = fig.add_subplot(gs[1, 0])
+
+    client_lat_uni = extract_metric(uniform, 'avg_latency', cumsum=True)
+    client_lat_adapt = extract_metric(adaptive, 'avg_latency', cumsum=True)
+
+    if client_lat_uni:
+        ax4.plot(range(1, len(client_lat_uni) + 1), client_lat_uni,
+                 color=COLORS['uniform'], label='Uniform DP', linewidth=2.5)
+    if client_lat_adapt:
+        ax4.plot(range(1, len(client_lat_adapt) + 1), client_lat_adapt,
+                 color=COLORS['adaptive'], label='QPrivIoT', linewidth=2.5)
+
+    ax4.set_xlabel('Round')
+    ax4.set_ylabel('Cumulative Time (s)')
+    ax4.set_title('(d) Training Efficiency', fontweight='bold')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+
+    ax5 = fig.add_subplot(gs[1, 1])
+
+    if client_lat_uni and client_lat_adapt:
+        acc_uni = extract_metric(uniform, 'val_accuracy', scale=100)
+        acc_adapt = extract_metric(adaptive, 'val_accuracy', scale=100)
+
+        min_len = min(len(acc_uni), len(client_lat_uni), len(acc_adapt), len(client_lat_adapt))
+        acc_uni = acc_uni[:min_len]
+        client_lat_uni = client_lat_uni[:min_len]
+        acc_adapt = acc_adapt[:min_len]
+        client_lat_adapt = client_lat_adapt[:min_len]
+
+        eff_uni = [a / max(t, 0.01) for a, t in zip(acc_uni, client_lat_uni)]
+        eff_adapt = [a / max(t, 0.01) for a, t in zip(acc_adapt, client_lat_adapt)]
+
+        ax5.plot(range(1, len(eff_uni) + 1), eff_uni,
+                 color=COLORS['uniform'], label='Uniform DP', linewidth=2.5)
+        ax5.plot(range(1, len(eff_adapt) + 1), eff_adapt,
+                 color=COLORS['adaptive'], label='QPrivIoT', linewidth=2.5)
+
+    ax5.set_xlabel('Round')
+    ax5.set_ylabel('Efficiency (Acc/Time)')
+    ax5.set_title('(e) Training Efficiency', fontweight='bold')
+    ax5.legend()
+    ax5.grid(True, alpha=0.3)
+
+    ax6 = fig.add_subplot(gs[1, 2])
+
+    res_adapt = extract_metric(adaptive, 'avg_resource')
+    if res_adapt:
+        ax6.plot(range(1, len(res_adapt) + 1), res_adapt,
+                 marker='o', color=COLORS['adaptive'], label='Avg Resource Score',
+                 linewidth=2.5, markersize=8)
+
+        eligibility_threshold = 0.15
+        ax6.axhline(y=eligibility_threshold, color='red', linestyle='--', linewidth=2,
+                    label='Eligibility Threshold')
+
+    ax6.set_xlabel('Round')
+    ax6.set_ylabel('Resource Score')
+    ax6.set_title('(f) Device Participation', fontweight='bold')
+    ax6.set_ylim([0, 1.1])
+    ax6.legend()
+    ax6.grid(True, alpha=0.3)
+
+    ax7 = fig.add_subplot(gs[2, 0])
+
+    sens = extract_metric(adaptive, 'avg_sensitivity')
+    if sens:
+        ax7.plot(range(1, len(sens) + 1), sens,
+                 color='purple', linewidth=2.5)
+        ax7.fill_between(range(1, len(sens) + 1), sens, alpha=0.3, color='purple')
+
+    ax7.set_xlabel('Round')
+    ax7.set_ylabel('Gradient Norm')
+    ax7.set_title('(g) Gradient Sensitivity', fontweight='bold')
+    ax7.grid(True, alpha=0.3)
+
+    ax8 = fig.add_subplot(gs[2, 1])
+
+    conv_score = extract_metric(adaptive, 'convergence_score')
+    if conv_score:
+        ax8.plot(range(1, len(conv_score) + 1), conv_score,
+                 color='orange', linewidth=2.5)
+        ax8.axhline(y=0.8, color='green', linestyle='--', linewidth=2,
+                    label='Converged (>0.8)')
+
+    ax8.set_xlabel('Round')
+    ax8.set_ylabel('Convergence Score')
+    ax8.set_title('(h) Model Convergence', fontweight='bold')
+    ax8.set_ylim([0, 1.1])
+    ax8.legend()
+    ax8.grid(True, alpha=0.3)
+
+    ax9 = fig.add_subplot(gs[2, 2])
+
+    clip_norms = extract_metric(adaptive, 'clip_norm')
+    if clip_norms:
+        ax9.plot(range(1, len(clip_norms) + 1), clip_norms,
+                 color='brown', linewidth=2.5)
+        initial_norm = 1.0
+        ax9.axhline(y=initial_norm, color='red', linestyle=':', linewidth=2,
+                    label=f'Initial Norm ({initial_norm})')
+
+    ax9.set_xlabel('Round')
+    ax9.set_ylabel('Clipping Norm')
+    ax9.set_title('(i) Adaptive Clipping', fontweight='bold')
+    ax9.legend()
+    ax9.grid(True, alpha=0.3)
+
+    ax10 = fig.add_subplot(gs[3, 0])
+
+    final_accs = []
+    labels = []
+    colors = []
+
+    for name, data, key in [('No DP', no_dp, 'no_dp'),
+                            ('Uniform DP', uniform, 'uniform'),
+                            ('QPrivIoT', adaptive, 'adaptive')]:
+        vals = extract_metric(data, 'val_accuracy', scale=100)
+        if vals:
+            final_accs.append(vals[-1])
+            labels.append(name)
+            colors.append(COLORS[key])
+
+    if final_accs:
+        bars = ax10.bar(labels, final_accs, color=colors, alpha=0.8, edgecolor='black', linewidth=2)
+        ax10.bar_label(bars, fmt='%.1f%%', fontsize=12, fontweight='bold')
+
+    ax10.set_ylabel('Accuracy (%)')
+    ax10.set_title('(j) Final Model Accuracy', fontweight='bold')
+    ax10.set_ylim([0, max(final_accs) * 1.2] if final_accs else [0, 100])
+    ax10.grid(True, alpha=0.3, axis='y')
+
+    ax11 = fig.add_subplot(gs[3, 1])
+
+    eps_uni = extract_metric(uniform, 'total_epsilon')
+    eps_adapt = extract_metric(adaptive, 'total_epsilon')
+    acc_uni = extract_metric(uniform, 'val_accuracy', scale=100)
+    acc_adapt = extract_metric(adaptive, 'val_accuracy', scale=100)
+
+    if eps_uni and acc_uni:
+        ax11.scatter(eps_uni[-1], acc_uni[-1], s=300, color=COLORS['uniform'],
+                     marker='s', edgecolor='black', linewidth=2, label='Uniform DP', zorder=3)
+    if eps_adapt and acc_adapt:
+        ax11.scatter(eps_adapt[-1], acc_adapt[-1], s=400, color=COLORS['adaptive'],
+                     marker='^', edgecolor='black', linewidth=2, label='QPrivIoT', zorder=3)
+
+    ax11.set_xlabel('Privacy Cost (ε)')
+    ax11.set_ylabel('Accuracy (%)')
+    ax11.set_title('(k) Privacy-Utility Trade-off', fontweight='bold')
+    ax11.legend(loc='lower right')
+    ax11.grid(True, alpha=0.3)
+
+    ax12 = fig.add_subplot(gs[3, 2], polar=True)
+
+    categories = ['Accuracy', 'Speed', 'Privacy', 'Stability']
+
+    def get_normalized_stats(data):
+
+        acc = extract_metric(data, 'val_accuracy')[-1] if extract_metric(data, 'val_accuracy') else 0.5
+
+        lat = extract_metric(data, 'avg_latency', cumsum=True)[-1] if extract_metric(data, 'avg_latency') else 1.0
+
+        eps = extract_metric(data, 'total_epsilon')[-1] if extract_metric(data, 'total_epsilon') else 10.0
+
+        loss = extract_metric(data, 'val_loss')[-1] if extract_metric(data, 'val_loss') else 1.0
+
+        return [
+            acc,
+            1.0 / (lat + 0.1),
+            1.0 / (eps + 0.1),
+            1.0 / (loss + 0.1)
+        ]
+
+    values_uni = get_normalized_stats(uniform)
+    values_adapt = get_normalized_stats(adaptive)
+
+    if all(len(v) == 4 for v in [values_uni, values_adapt]):
+        all_vals = np.array([values_uni, values_adapt])
+        mins = all_vals.min(axis=0)
+        maxs = all_vals.max(axis=0)
+
+        values_uni_norm = [(v - mi) / (ma - mi + 1e-6) for v, mi, ma in zip(values_uni, mins, maxs)]
+        values_adapt_norm = [(v - mi) / (ma - mi + 1e-6) for v, mi, ma in zip(values_adapt, mins, maxs)]
+    else:
+
+        values_uni_norm = [0.5] * 5
+        values_adapt_norm = [0.5] * 5
+
+    angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
+    values_uni_norm += values_uni_norm[:1]
+    values_adapt_norm += values_adapt_norm[:1]
+    angles += angles[:1]
+
+    ax12.plot(angles, values_uni_norm, 'o-', linewidth=2.5,
+              color=COLORS['uniform'], label='Uniform DP')
+    ax12.fill(angles, values_uni_norm, alpha=0.15, color=COLORS['uniform'])
+
+    ax12.plot(angles, values_adapt_norm, '^-', linewidth=2.5,
+              color=COLORS['adaptive'], label='QPrivIoT')
+    ax12.fill(angles, values_adapt_norm, alpha=0.25, color=COLORS['adaptive'])
+
+    ax12.set_xticks(angles[:-1])
+    ax12.set_xticklabels(categories, fontsize=12)
+    ax12.set_ylim(0, 1)
+    ax12.set_title('(l) System Balance', fontweight='bold', pad=20)
+    ax12.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+    ax12.grid(True)
+
+    plt.tight_layout()
+
+    output_file = "paper_figures_combined.png"
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"\n✅ Figure saved: {output_file}")
+    print(f"   Resolution: 300 DPI")
+    print(f"   Size: {fig.get_size_inches()[0]:.1f} x {fig.get_size_inches()[1]:.1f} inches")
+
+    plt.show()
+
+    print("\n" + "=" * 60)
+    print("✨ Plotting complete!")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
-    # Load your experiment results
-    no_dp, uniform_dp, adaptive_dp = load_results(
-        no_dp_path="results_no_dp.json",
-        uniform_dp_path="results_uniform_dp.json",
-        adaptive_dp_path="results_adaptive_dp.json"
-    )
-
-    # Generate paper figures
-    plot_paper_figures(no_dp, uniform_dp, adaptive_dp, save_path="graphs.png")
-
-    # Print summary table
-    print_summary_table(no_dp, uniform_dp, adaptive_dp)
+    plot_all()
