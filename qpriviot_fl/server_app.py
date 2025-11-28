@@ -101,7 +101,7 @@ class ProgressivePrivacyStrategy(FedAvg):
 
     def aggregate_fit(self, server_round, results, failures):
         if not results:
-            print("  ⚠️ No clients returned results. Skipping aggregation.")
+            print("  No clients returned results. Skipping aggregation.")
             return None, {}
 
         total_available_clients = 1
@@ -110,7 +110,7 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         if self.current_parameters is None:
             print(
-                "  🛑 Error: Global model parameters (self.current_parameters) are not available. Cannot proceed with aggregation."
+                "  Error: Global model parameters (self.current_parameters) are not available. Cannot proceed with aggregation."
             )
             return None, {}
 
@@ -121,7 +121,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         averaged_delta: List[np.ndarray]
 
         if is_secagg_round:
-            print("  🔓 Aggregating Masked Updates (SecAgg: Summing Integers)...")
+            print("  Aggregating Masked Updates (SecAgg: Summing Integers)...")
 
             first_res_params = parameters_to_ndarrays(results[0][1].parameters)
             aggregated_integers_delta = [
@@ -142,7 +142,7 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         else:
 
-            print("  ➡️ Aggregating Deltas (Standard FedAvg)...")
+            print("  Aggregating Deltas (Standard FedAvg)...")
 
             num_participants = len(results)
 
@@ -207,7 +207,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         with open(self.results_file, "w") as f:
             json.dump({"rounds": self.experiments_log}, f, indent=2)
 
-        print(f"  💾 Saving global model to {self.model_file}...")
+        print(f"  Saving global model to {self.model_file}...")
         np.savez(self.model_file, *aggregated_model_ndarrays)
 
 
