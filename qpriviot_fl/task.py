@@ -135,6 +135,10 @@ def train(model, loader, epochs, lr, device):
             optimizer.zero_grad()
             loss = criterion(model(x), y)
             loss.backward()
+            
+            # Standard gradient clipping for stability
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            
             optimizer.step()
 
             total_loss += loss.item()
