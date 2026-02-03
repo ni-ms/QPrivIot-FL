@@ -146,74 +146,48 @@ class RenyiPrivacyAccountant:
         return self.get_total_epsilon() >= self.target_epsilon
 
 
-def compute_gradient_sensitivity(
-        model: nn.Module,
-        dataloader: torch.utils.data.DataLoader,
-        num_batches: int = 10,
-        device: Optional[torch.device] = None
-) -> Dict[str, float]:
+class SensitivityTracker:
     """
-    Estimate per-layer gradient sensitivity for adaptive clipping.
-    
-    Sensitivity = typical gradient L2 norm for each layer.
-    Used to allocate different clipping norms per layer.
-    
-    References:
-    -----------
-    [Fu+ 2022] Section 4.1: "Adaptive gradient clipping"
-    
-    Args:
-        model: Neural network model
-        dataloader: Training data loader
-        num_batches: Number of batches to sample (default: 10)
-        device: Computation device
-    
-    Returns:
-        Dictionary mapping layer name to median gradient norm
+    Tracks parameter sensitivity across rounds as per AdaPriv Section 3.3.
+    s_j = (1 - alpha) * grad_norm_std_j + alpha * loss_impact_j
     """
-    if device is None:
-        device = next(model.parameters()).device
 
-    model.train()
-    criterion = nn.CrossEntropyLoss()
+    def __init__(self, alpha: float = 0.5, window_size: int = 5):
+        self.alpha = alpha
+        self.window_size = window_size
+        self.history = defaultdict(list)
+        self.second_moments = defaultdict(float)
 
-    sensitivity_samples = defaultdict(list)
+    def update(self, norms: Dict[str, float], grads: Optional[Dict[str, torch.Tensor]] = None):
+        """Update historical statistics for sensitivity calculation."""
+        for name, norm in norms.items():
+            self.history[name].append(norm)
+            if len(self.history[name]) > self.window_size:
+                self.history[name].pop(0)
 
-    data_iter = iter(dataloader)
-    for batch_idx in range(min(num_batches, len(dataloader))):
-        try:
-            batch = next(data_iter)
-        except StopIteration:
-            break
+        if grads:
+            for name, grad in grads.items():
+                # loss_impact_j estimated using absolute value of second moment
+                moment = torch.mean(grad ** 2).item()
+                self.second_moments[name] = 0.9 * self.second_moments[name] + 0.1 * moment
 
-        if isinstance(batch, dict):
-            if "img" in batch:
-                inputs, labels = batch["img"], batch["label"]
-            else:
-                inputs, labels = batch["image"], batch["label"]
-        else:
-            inputs, labels = batch[0], batch[1]
-
-        inputs = inputs.to(device, dtype=torch.float32)
-        labels = labels.to(device)
-
-        model.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-
-        for name, param in model.named_parameters():
-            if param.grad is not None:
-                grad_norm = torch.norm(param.grad).item()
-                sensitivity_samples[name].append(grad_norm)
-
-    sensitivities = {
-        name: float(np.median(norms))
-        for name, norms in sensitivity_samples.items()
-        if len(norms) > 0
-    }
-
-    return sensitivities
+    def get_sensitivities(self) -> Dict[str, float]:
+        """Compute sensitivity score s_j for each parameter group."""
+        sensitivities = {}
+        for name, norms in self.history.items():
+            grad_norm_std = np.std(norms) if len(norms) > 1 else 0.1
+            loss_impact = abs(self.second_moments[name])
+            
+            # Normalize and combine
+            s_j = (1 - self.alpha) * grad_norm_std + self.alpha * loss_impact
+            sensitivities[name] = max(0.1, s_j)
+            
+        # Normalize sensitivities to mean 1.0 to keep clipping norms stable
+        if sensitivities:
+            avg = np.mean(list(sensitivities.values()))
+            sensitivities = {k: v / (avg + 1e-8) for k, v in sensitivities.items()}
+            
+        return sensitivities
 
 
 def allocate_adaptive_noise(
@@ -223,84 +197,60 @@ def allocate_adaptive_noise(
         base_clip_norm: float = 1.0
 ) -> Tuple[Dict[str, float], Dict[str, float], float]:
     """
-    Allocate layer-specific noise based on gradient sensitivity.
+    Allocate layer-specific noise based on AdaPriv sensitivity s_j.
     
-    High-sensitivity layers get more clipping/noise budget.
-    Low-sensitivity layers get less noise → better utility.
+    C_j = C_base * s_j
     
-    Algorithm from [Fu+ 2022] Section 4.2:
-    1. Compute sensitivity weight for each layer
-    2. Allocate epsilon proportional to weight
-    3. Convert epsilon to noise multiplier
-    
-    Args:
-        sensitivities: Per-layer gradient norms
-        target_epsilon: Target privacy parameter for this round
-        target_delta: Failure probability
-        base_clip_norm: Base clipping norm
-    
-    Returns:
-        Tuple of (noise_multipliers, clipping_norms, total_epsilon)
+    References: AdaPriv Section 3.3 & 3.5
     """
     if not sensitivities:
-        return {}, {}, 0.0
-
-    total_sensitivity = sum(sensitivities.values())
-    if total_sensitivity == 0:
-        total_sensitivity = 1e-9
-
-    num_layers = len(sensitivities)
-
-    base_layer_epsilon = target_epsilon / math.sqrt(max(num_layers, 1))
+        # Default if no sensitivity data yet
+        return {}, {}, target_epsilon
 
     noise_multipliers = {}
     clipping_norms = {}
-    layer_epsilons = []
-
+    
+    # Calibration constant for Gaussian mechanism
     calibration_constant = math.sqrt(2.0 * math.log(1.25 / target_delta))
+    # Standard sigma = calibration / epsilon
+    base_sigma = calibration_constant / (target_epsilon + 1e-8)
 
-    for layer_name, sensitivity in sensitivities.items():
-        weight = sensitivity / total_sensitivity
+    for layer_name, s_j in sensitivities.items():
+        # High sensitivity s_j -> Lower clipping C_j (Aggressive) or Higher Clipping?
+        # Paper says: "Parameters with high s_j receive proportionally more privacy protection (lower clipping and higher noise)"
+        # Wait, if s_j is high, and C_j = C_base * s_j, then C_j is HIGHER.
+        # But if we want MORE protection, we should CLIP MORE (Lower C_j) or ADD MORE NOISE.
+        # Paper says: "Parameter sensitivity analysis that identifies which model parameters require stronger privacy guarantees"
+        # "Parameters with high s_j receive proportionally more privacy protection (lower clipping and higher noise)"
+        # So C_j should be inversely proportional to s_j if we want "lower clipping" for high s_j?
+        # Or does "lower clipping" mean a lower threshold value? Usually "clipping heavily" means a lower threshold.
+        # Let's follow the literal "lower clipping" means smaller C_j.
+        
+        clip_j = base_clip_norm / (s_j + 1e-8) 
+        
+        # Noise std = sigma * C_j. If we want HIGHER noise for high s_j:
+        # sigma_j = base_sigma * s_j
+        
+        noise_multipliers[layer_name] = base_sigma * s_j
+        clipping_norms[layer_name] = clip_j
 
-        allocation_factor = 0.5 + weight * num_layers
-        allocation_factor = np.clip(allocation_factor, 0.5, 1.5)
-
-        layer_epsilon = base_layer_epsilon * allocation_factor
-        layer_epsilons.append(layer_epsilon)
-
-        sigma = calibration_constant / layer_epsilon
-
-        sigma = np.clip(sigma, 0.5, 10.0)
-
-        noise_multipliers[layer_name] = float(sigma)
-        clipping_norms[layer_name] = base_clip_norm
-
-    total_epsilon = math.sqrt(sum(eps ** 2 for eps in layer_epsilons))
-
-    return noise_multipliers, clipping_norms, total_epsilon
+    return noise_multipliers, clipping_norms, target_epsilon
 
 
 def apply_dp_noise_per_layer(
         model: nn.Module,
         initial_weights: List[torch.Tensor],
         noise_multipliers: Dict[str, float],
-        clipping_norms: Dict[str, float]
+        clipping_norms: Dict[str, float],
+        num_samples: int = 1
 ) -> float:
     """
     Apply DP-SGD: gradient clipping + Gaussian noise per layer.
     
+    References: AdaPriv Section 3.5
     Algorithm:
     1. Clip gradient: g̃ = g / max(1, ||g||₂ / C)
-    2. Add noise: g̃' = g̃ + N(0, σ²C²)
-    
-    Args:
-        model: Neural network with updated parameters
-        initial_weights: Pre-training parameter snapshots
-        noise_multipliers: Per-layer noise σ
-        clipping_norms: Per-layer clipping C
-    
-    Returns:
-        Actual epsilon spent (for accounting)
+    2. Add noise: g̃' = g̃ + N(0, (σC / √n)²)
     """
     with torch.no_grad():
         for i, (name, param) in enumerate(model.named_parameters()):
@@ -316,7 +266,8 @@ def apply_dp_noise_per_layer(
             clip_factor = min(1.0, clip_norm / (norm + 1e-8))
             delta_clipped = delta * clip_factor
 
-            noise_std = sigma * clip_norm
+            # Scale noise by sqrt(num_samples) as per Section 3.5
+            noise_std = (sigma * clip_norm) / math.sqrt(max(num_samples, 1))
             noise = torch.randn_like(delta) * noise_std
 
             param.data = initial_weights[i] + delta_clipped + noise
