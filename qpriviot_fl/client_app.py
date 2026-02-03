@@ -11,7 +11,6 @@ from qpriviot_fl.config import DEFAULT_CONFIG as CONFIG
 from qpriviot_fl.device_profile import profile_device
 from qpriviot_fl.task import load_data, make_model, train, test
 from qpriviot_fl.privacy_utils import (
-    compute_gradient_sensitivity,
     allocate_adaptive_noise,
     apply_dp_noise_per_layer,
     quantize,
@@ -71,12 +70,8 @@ class QPrivIoTClient(NumPyClient):
 
             initial_weights_list = [p.detach().clone() for p in model.parameters()]
 
-            layer_sensitivities = compute_gradient_sensitivity(model, train_loader, device=device)
-
-            # CAPTURE SENSITIVITY METRICS
-            avg_sensitivity = float(np.mean(list(layer_sensitivities.values()))) if layer_sensitivities else 0.0
-
-
+            # SENSITIVITY METRICS (Now received from server or set to default)
+            avg_sensitivity = 0.0
             noise_mults = {}
             clip_norms_map = {}
             dp_was_applied = False
@@ -84,48 +79,68 @@ class QPrivIoTClient(NumPyClient):
             base_clip_norm_res = float(getattr(CONFIG.privacy, "initial_clip_norm", 0.05)) * max(self.res_score, 0.01)
 
             if use_adaptive_dp:
+                # Extract AdaPriv parameters from config
+                epsilon_t = float(config.get("epsilon_t", 1.0))
+                sensitivities_str = config.get("sensitivities", "{}")
+                try:
+                    sensitivities_map = json.loads(sensitivities_str)
+                except:
+                    sensitivities_map = {}
 
-                server_convergence = float(config.get("convergence_score", 0.0))
-                target_eps = float(self.run_config.get("target-epsilon", 10.0))
-                total_rounds = int(self.run_config.get("num-server-rounds", 10))
-
-                round_base_eps = target_eps / math.sqrt(max(total_rounds, 1))
-                adaptive_round_eps = round_base_eps * (1.0 + server_convergence)
-
+                # Adjust noise multiplier based on Readiness Score R_i
+                # If resource is low, we might want to reduce load.
+                # Here we use readiness_score to scale noise multiplier.
+                # sigma_i in Section 3.5
+                sigma_i_factor = 1.0 / (self.res_score + 1e-8)
+                sigma_i_factor = np.clip(sigma_i_factor, 1.0, 2.0)
+                
+                # Allocate noise per layer based on sensitivities
                 noise_mults, clip_norms_map, _ = allocate_adaptive_noise(
-                    sensitivities=layer_sensitivities,
-                    target_epsilon=adaptive_round_eps,
+                    sensitivities=sensitivities_map,
+                    target_epsilon=epsilon_t,
                     base_clip_norm=base_clip_norm_res,
                 )
+                
+                # Scale noise multipliers by per-client factor sigma_i
+                for k in noise_mults:
+                    noise_mults[k] *= sigma_i_factor
+
                 dp_was_applied = True
                 dp_mode = "Adaptive"
-                print(f"CLIENT {self.partition_id}: Adaptive DP (Conv={server_convergence:.2f})")
+                print(f"CLIENT {self.partition_id}: AdaPriv (ε_t={epsilon_t:.3f}, R_i={self.res_score:.2f})")
 
             elif use_dp:
-
-                noise_mults = {name: base_noise for name in layer_sensitivities.keys()}
-
+                # Standard DP fallback
+                noise_mults = {name: base_noise for name in model.state_dict().keys()}
                 fixed_clip_norm = base_clip_norm_res * 2
-                clip_norms_map = {name: fixed_clip_norm for name in layer_sensitivities.keys()}
+                clip_norms_map = {name: fixed_clip_norm for name in model.state_dict().keys()}
                 dp_was_applied = True
                 dp_mode = "Fixed"
                 print(f"CLIENT {self.partition_id}: Fixed DP (Noise={base_noise:.3f})")
 
             else:
-
-                fixed_clip_norm = 10.0
-                clip_norms_map = {name: fixed_clip_norm for name in layer_sensitivities.keys()}
                 dp_mode = "None"
+                # Use a larger default clip norm for No DP to prevent explosion
+                fixed_clip_norm = 5.0
+                clip_norms_map = {name: fixed_clip_norm for name in model.state_dict().keys()}
                 print(f"CLIENT {self.partition_id}: Baseline Mode (No DP)")
-                # CAPTURE CLIPPING NORMS
-            avg_clip_norm = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
+            
+            # Apply Delta Clipping even in No DP mode for FL stability
+            if not dp_was_applied and dp_mode == "None":
+                 apply_dp_noise_per_layer(model, initial_weights_list, {}, clip_norms_map, num_samples=1)
 
+            # Record average metrics for telemetry
+            avg_clip_norm = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
+            avg_noise = float(np.mean(list(noise_mults.values()))) if noise_mults else 0.0
+
+            # Training
             train_loss = float(train(model, train_loader, epochs=local_epochs, lr=learning_rate, device=device))
 
             if dp_was_applied:
-                apply_dp_noise_per_layer(model, initial_weights_list, noise_mults, clip_norms_map)
+                num_samples = len(train_loader.dataset)
+                apply_dp_noise_per_layer(model, initial_weights_list, noise_mults, clip_norms_map, num_samples=num_samples)
 
-                # EVALUATE ON VALIDATION SET BEFORE RETURNING
+            # Evaluate
             eval_params = self._get_parameters(model)
             val_loss, val_num_samples, eval_metrics_dict = self.evaluate(eval_params, config)
 
@@ -137,12 +152,19 @@ class QPrivIoTClient(NumPyClient):
                 for i in range(len(updated_params_final))
             ]
 
-            avg_noise = float(np.mean(list(noise_mults.values()))) if noise_mults else 0.0
-
-            metrics = {"train_loss": train_loss, "resource_score": self.res_score, "avg_noise": avg_noise,
-                       "client_latency": base_latency, "secagg_active": use_secagg, "dp_mode": dp_mode,
-                       "device_id": DEVICE_MAP.get(self.device_type, 0), "evaluation_metrics": eval_metrics_dict,
-                       "val_loss": float(val_loss), "avg_sensitivity": avg_sensitivity, "clip_norm": avg_clip_norm}
+            metrics = {
+                "train_loss": train_loss, 
+                "resource_score": self.res_score, 
+                "avg_noise": avg_noise,
+                "client_latency": base_latency, 
+                "secagg_active": use_secagg, 
+                "dp_mode": dp_mode,
+                "device_id": DEVICE_MAP.get(self.device_type, 0), 
+                "val_accuracy": float(eval_metrics_dict.get("accuracy", 0.0)),
+                "val_loss": float(val_loss), 
+                "avg_sensitivity": avg_sensitivity, 
+                "clip_norm": avg_clip_norm
+            }
 
             if use_secagg:
                 print(f"CLIENT {self.partition_id}: Applying SecAgg (Quantization and Masking)")
