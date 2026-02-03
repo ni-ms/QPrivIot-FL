@@ -199,38 +199,34 @@ def allocate_adaptive_noise(
     """
     Allocate layer-specific noise based on AdaPriv sensitivity s_j.
     
-    C_j = C_base * s_j
+    High sensitivity s_j -> Lower clipping C_j + Higher noise sigma_j
+    This provides "stronger privacy guarantees" for sensitive parameters.
     
     References: AdaPriv Section 3.3 & 3.5
     """
     if not sensitivities:
-        # Default if no sensitivity data yet
+        # Default if no sensitivity data yet - return empty dicts
         return {}, {}, target_epsilon
 
     noise_multipliers = {}
     clipping_norms = {}
     
     # Calibration constant for Gaussian mechanism
+    # From DP theory: sigma = c / epsilon where c = sqrt(2*ln(1.25/delta))
     calibration_constant = math.sqrt(2.0 * math.log(1.25 / target_delta))
-    # Standard sigma = calibration / epsilon
-    base_sigma = calibration_constant / (target_epsilon + 1e-8)
+    # Standard sigma = calibration / epsilon (prevent division by zero)
+    base_sigma = calibration_constant / max(target_epsilon, 1e-6)
 
     for layer_name, s_j in sensitivities.items():
-        # High sensitivity s_j -> Lower clipping C_j (Aggressive) or Higher Clipping?
-        # Paper says: "Parameters with high s_j receive proportionally more privacy protection (lower clipping and higher noise)"
-        # Wait, if s_j is high, and C_j = C_base * s_j, then C_j is HIGHER.
-        # But if we want MORE protection, we should CLIP MORE (Lower C_j) or ADD MORE NOISE.
-        # Paper says: "Parameter sensitivity analysis that identifies which model parameters require stronger privacy guarantees"
-        # "Parameters with high s_j receive proportionally more privacy protection (lower clipping and higher noise)"
-        # So C_j should be inversely proportional to s_j if we want "lower clipping" for high s_j?
-        # Or does "lower clipping" mean a lower threshold value? Usually "clipping heavily" means a lower threshold.
-        # Let's follow the literal "lower clipping" means smaller C_j.
+        # Ensure s_j is valid (positive and finite)
+        if not (0 < s_j < float('inf')):
+            s_j = 1.0  # Fallback to neutral sensitivity
         
-        clip_j = base_clip_norm / (s_j + 1e-8) 
+        # Section 3.5: Higher s_j means more sensitive parameter
+        # Lower clipping C_j = more aggressive gradient truncation
+        clip_j = base_clip_norm / (s_j + 1e-8)
         
-        # Noise std = sigma * C_j. If we want HIGHER noise for high s_j:
-        # sigma_j = base_sigma * s_j
-        
+        # Higher noise sigma_j = more Gaussian perturbation
         noise_multipliers[layer_name] = base_sigma * s_j
         clipping_norms[layer_name] = clip_j
 

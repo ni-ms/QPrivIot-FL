@@ -176,7 +176,7 @@ class ProgressivePrivacyStrategy(FedAvg):
             averaged_delta = [d / num_participants for d in deltas]
 
         # Update sensitivity tracker with averaged deltas as proxies for global gradients
-        model_keys = self.sensitivity_tracker.history.keys()
+        model_keys = list(self.sensitivity_tracker.history.keys())
         if not model_keys:
              # Initialize keys from first result if empty
              mock_model = make_model("cifar10") # Placeholder to get keys
@@ -215,6 +215,10 @@ class ProgressivePrivacyStrategy(FedAvg):
         val_loss = np.mean([r.metrics.get("val_loss", 0.0) for _, r in results])
         clip_norm = np.mean([r.metrics.get("clip_norm", 0.0) for _, r in results])
         avg_sensitivity = np.mean([r.metrics.get("avg_sensitivity", 0.0) for _, r in results])
+
+        # Privacy budget verification
+        if dp_mode != "None" and current_epsilon > self.target_epsilon:
+            print(f"  ⚠️  WARNING: Privacy budget exceeded! ε={current_epsilon:.2f} > target={self.target_epsilon:.2f}")
 
         print(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
 

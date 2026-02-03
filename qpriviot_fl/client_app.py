@@ -88,9 +88,10 @@ class QPrivIoTClient(NumPyClient):
                     sensitivities_map = {}
 
                 # Adjust noise multiplier based on Readiness Score R_i
-                # If resource is low, we might want to reduce load.
-                # Here we use readiness_score to scale noise multiplier.
-                # sigma_i in Section 3.5
+                # Section 3.5: Resource-constrained devices get higher noise to reduce their impact
+                # Range [1.0, 2.0] chosen to balance privacy and utility:
+                # - 1.0 for high-resource devices (normal noise)
+                # - 2.0 for low-resource devices (double noise, less influence)
                 sigma_i_factor = 1.0 / (self.res_score + 1e-8)
                 sigma_i_factor = np.clip(sigma_i_factor, 1.0, 2.0)
                 
@@ -110,25 +111,27 @@ class QPrivIoTClient(NumPyClient):
                 print(f"CLIENT {self.partition_id}: AdaPriv (ε_t={epsilon_t:.3f}, R_i={self.res_score:.2f})")
 
             elif use_dp:
-                # Standard DP fallback
-                noise_mults = {name: base_noise for name in model.state_dict().keys()}
-                fixed_clip_norm = base_clip_norm_res * 2
+                # Fixed DP: Use ABSOLUTE clip norm (not resource-scaled) to prevent gradient explosion
+                # Standard DP literature typically uses clip_norm=1.0 for neural networks
+                fixed_clip_norm = 1.0
+                fixed_noise_multiplier = base_noise
+                
+                noise_mults = {name: fixed_noise_multiplier for name in model.state_dict().keys()}
                 clip_norms_map = {name: fixed_clip_norm for name in model.state_dict().keys()}
                 dp_was_applied = True
                 dp_mode = "Fixed"
-                print(f"CLIENT {self.partition_id}: Fixed DP (Noise={base_noise:.3f})")
+                print(f"CLIENT {self.partition_id}: Fixed DP (Noise={fixed_noise_multiplier:.3f}, Clip={fixed_clip_norm:.2f})")
 
             else:
                 dp_mode = "None"
-                # Use a larger default clip norm for No DP to prevent explosion
+                # Use a larger default clip norm for No DP to prevent explosion in FL
+                # 5.0 chosen empirically for CIFAR-10 CNNs
                 fixed_clip_norm = 5.0
                 clip_norms_map = {name: fixed_clip_norm for name in model.state_dict().keys()}
+                # Initialize empty noise multipliers for consistency
+                noise_mults = {name: 0.0 for name in model.state_dict().keys()}
                 print(f"CLIENT {self.partition_id}: Baseline Mode (No DP)")
             
-            # Apply Delta Clipping even in No DP mode for FL stability
-            if not dp_was_applied and dp_mode == "None":
-                 apply_dp_noise_per_layer(model, initial_weights_list, {}, clip_norms_map, num_samples=1)
-
             # Record average metrics for telemetry
             avg_clip_norm = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
             avg_noise = float(np.mean(list(noise_mults.values()))) if noise_mults else 0.0
