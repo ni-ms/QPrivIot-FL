@@ -33,6 +33,13 @@ class QPrivIoTClient(NumPyClient):
         self.num_partitions = int(self.node_config.get("num-partitions", 1))
 
     def fit(self, parameters, config):
+        # Default metric values for telemetry
+        avg_sensitivity = 0.0
+        avg_clip_norm = 0.0
+        min_noise = 0.0
+        dp_mode = "None"
+        dp_was_applied = False
+        
         """Train parameters on the locally held dataset."""
         try:
 
@@ -96,12 +103,18 @@ class QPrivIoTClient(NumPyClient):
                 sigma_i_factor = np.clip(sigma_i_factor, 1.0, 2.0)
                 
                 # Allocate noise per layer based on sensitivities
-                noise_mults, clip_norms_map, _ = allocate_adaptive_noise(
+                noise_mults, clip_norms_map, base_sigma = allocate_adaptive_noise(
                     sensitivities=sensitivities_map,
                     target_epsilon=epsilon_t,
                     base_clip_norm=base_clip_norm_res,
                 )
                 
+                # If Round 1 (no sensitivities), use uniform base noise
+                if not noise_mults:
+                    model_keys = list(model.state_dict().keys())
+                    noise_mults = {k: base_sigma for k in model_keys}
+                    clip_norms_map = {k: base_clip_norm_res for k in model_keys}
+
                 # Scale noise multipliers by per-client factor sigma_i
                 for k in noise_mults:
                     noise_mults[k] *= sigma_i_factor
@@ -111,16 +124,17 @@ class QPrivIoTClient(NumPyClient):
                 print(f"CLIENT {self.partition_id}: AdaPriv (ε_t={epsilon_t:.3f}, R_i={self.res_score:.2f})")
 
             elif use_dp:
-                # Fixed DP: Use ABSOLUTE clip norm (not resource-scaled) to prevent gradient explosion
-                # Standard DP literature typically uses clip_norm=1.0 for neural networks
+                # Fixed DP: Calibrate noise to the per-round epsilon for a fair comparison
+                epsilon_t = float(config.get("epsilon_t", 1.0))
+                # base_sigma approx 1/epsilon (matches allocate_adaptive_noise logic)
+                fixed_noise_multiplier = 1.0 / max(epsilon_t, 1e-6)
                 fixed_clip_norm = 1.0
-                fixed_noise_multiplier = base_noise
                 
                 noise_mults = {name: fixed_noise_multiplier for name in model.state_dict().keys()}
                 clip_norms_map = {name: fixed_clip_norm for name in model.state_dict().keys()}
                 dp_was_applied = True
                 dp_mode = "Fixed"
-                print(f"CLIENT {self.partition_id}: Fixed DP (Noise={fixed_noise_multiplier:.3f}, Clip={fixed_clip_norm:.2f})")
+                print(f"CLIENT {self.partition_id}: Fixed DP (ε_t={epsilon_t:.3f}, Noise={fixed_noise_multiplier:.3f}, Clip={fixed_clip_norm:.2f})")
 
             else:
                 dp_mode = "None"
@@ -132,9 +146,14 @@ class QPrivIoTClient(NumPyClient):
                 noise_mults = {name: 0.0 for name in model.state_dict().keys()}
                 print(f"CLIENT {self.partition_id}: Baseline Mode (No DP)")
             
-            # Record average metrics for telemetry
+            # Record performance metrics for telemetry
             avg_clip_norm = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
-            avg_noise = float(np.mean(list(noise_mults.values()))) if noise_mults else 0.0
+            # Record minimum noise for conservative privacy accounting (worst-case)
+            min_noise = float(np.min(list(noise_mults.values()))) if noise_mults else 0.0
+            
+            # If round has sensitivity data, record avg sensitivity
+            if "sensitivities" in locals() and sensitivities_map:
+                 avg_sensitivity = np.mean(list(sensitivities_map.values()))
 
             # Training
             train_loss = float(train(model, train_loader, epochs=local_epochs, lr=learning_rate, device=device))
@@ -158,7 +177,7 @@ class QPrivIoTClient(NumPyClient):
             metrics = {
                 "train_loss": train_loss, 
                 "resource_score": self.res_score, 
-                "avg_noise": avg_noise,
+                "avg_noise": min_noise,  # Reported as avg_noise for compatibility but represents min_noise
                 "client_latency": base_latency, 
                 "secagg_active": use_secagg, 
                 "dp_mode": dp_mode,

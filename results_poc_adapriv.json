@@ -1,0 +1,79 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "avg_loss": 2.087398668297916,
+      "val_accuracy": 0.11309999999999999,
+      "val_loss": 7.350137251253707,
+      "convergence_score": 0.0,
+      "total_epsilon": 0.8999214840303682,
+      "epsilon_t": 0.44999999999999996,
+      "sensitivities": {
+        "conv1.weight": 0.99999990000001,
+        "conv1.bias": 0.99999990000001,
+        "conv2.weight": 0.99999990000001,
+        "conv2.bias": 0.99999990000001,
+        "fc1.weight": 0.99999990000001,
+        "fc1.bias": 0.99999990000001,
+        "fc2.weight": 0.99999990000001,
+        "fc2.bias": 0.99999990000001
+      },
+      "avg_latency": 0.29319948352138814,
+      "avg_resource": 0.24935201403935336,
+      "clip_norm": 0.24935201403935336,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "Adaptive"
+    },
+    {
+      "round": 2,
+      "avg_loss": 1.5593129310828104,
+      "val_accuracy": 0.156075,
+      "val_loss": 4.248335757765907,
+      "convergence_score": 0.0,
+      "total_epsilon": 1.2828505321107666,
+      "epsilon_t": 0.4499259840548596,
+      "sensitivities": {
+        "conv1.weight": 0.99999990000001,
+        "conv1.bias": 0.99999990000001,
+        "conv2.weight": 0.99999990000001,
+        "conv2.bias": 0.99999990000001,
+        "fc1.weight": 0.99999990000001,
+        "fc1.bias": 0.99999990000001,
+        "fc2.weight": 0.99999990000001,
+        "fc2.bias": 0.99999990000001
+      },
+      "avg_latency": 0.31658175002162114,
+      "avg_resource": 0.24126125060439926,
+      "clip_norm": 0.24126125060439926,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "Adaptive"
+    },
+    {
+      "round": 3,
+      "avg_loss": 1.3158935233001496,
+      "val_accuracy": 0.20055,
+      "val_loss": 4.620860821332413,
+      "convergence_score": 0.42075404339100075,
+      "total_epsilon": 1.5797348644657967,
+      "epsilon_t": 0.4497040092642407,
+      "sensitivities": {
+        "conv1.weight": 0.99999990000001,
+        "conv1.bias": 0.99999990000001,
+        "conv2.weight": 0.99999990000001,
+        "conv2.bias": 0.99999990000001,
+        "fc1.weight": 0.99999990000001,
+        "fc1.bias": 0.99999990000001,
+        "fc2.weight": 0.99999990000001,
+        "fc2.bias": 0.99999990000001
+      },
+      "avg_latency": 0.31982149657498016,
+      "avg_resource": 0.2392625375274882,
+      "clip_norm": 0.2392625375274882,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "Adaptive"
+    }
+  ]
+}

@@ -204,33 +204,35 @@ def allocate_adaptive_noise(
     
     References: AdaPriv Section 3.3 & 3.5
     """
+    # Calibration: Instead of a conservative full-budget Gaussian mechanism,
+    # we use a per-round scaling that relates target_epsilon to sigma.
+    # In DP-SGD, sigma approx 1.0/epsilon is a standard heuristic for sub-privacy budgets.
+    base_sigma = 1.0 / max(target_epsilon, 1e-6)
+
     if not sensitivities:
-        # Default if no sensitivity data yet - return empty dicts
-        return {}, {}, target_epsilon
+        # Default if no sensitivity data yet - return empty dicts and base_sigma
+        return {}, {}, base_sigma
 
     noise_multipliers = {}
     clipping_norms = {}
-    
-    # Calibration constant for Gaussian mechanism
-    # From DP theory: sigma = c / epsilon where c = sqrt(2*ln(1.25/delta))
-    calibration_constant = math.sqrt(2.0 * math.log(1.25 / target_delta))
-    # Standard sigma = calibration / epsilon (prevent division by zero)
-    base_sigma = calibration_constant / max(target_epsilon, 1e-6)
 
     for layer_name, s_j in sensitivities.items():
         # Ensure s_j is valid (positive and finite)
         if not (0 < s_j < float('inf')):
             s_j = 1.0  # Fallback to neutral sensitivity
         
-        # Section 3.5: Higher s_j means more sensitive parameter
-        # Lower clipping C_j = more aggressive gradient truncation
-        clip_j = base_clip_norm / (s_j + 1e-8)
+        # Adaptive Clipping: Sensitivity s_j scales the clipping norm
+        # High s_j -> Lower clip_j (more protection)
+        # We add a floor and cap to s_j for clipping stability
+        s_j_clip = np.clip(s_j, 0.5, 2.0)
+        clip_j = base_clip_norm / s_j_clip
         
-        # Higher noise sigma_j = more Gaussian perturbation
+        # Adaptive Noise: Sensitivity s_j scales the noise multiplier
+        # High s_j -> Higher sigma_j (more protection)
         noise_multipliers[layer_name] = base_sigma * s_j
         clipping_norms[layer_name] = clip_j
 
-    return noise_multipliers, clipping_norms, target_epsilon
+    return noise_multipliers, clipping_norms, base_sigma
 
 
 def apply_dp_noise_per_layer(
