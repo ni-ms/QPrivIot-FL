@@ -198,12 +198,13 @@ class ProgressivePrivacyStrategy(FedAvg):
         ]
         agg_params = ndarrays_to_parameters(new_global_params_ndarrays)
 
-        avg_noise = np.mean([r.metrics.get("avg_noise", 0) for _, r in results])
+        # Use conservative (minimum) noise across all participants for valid DP accounting
+        min_noise_multiplier = np.min([r.metrics.get("avg_noise", 0) for _, r in results])
         sampling_rate = len(results) / total_available_clients
         dp_mode = results[0][1].metrics.get("dp_mode", "None")
-
+        
         if dp_mode != "None":
-            self.accountant.add_round(noise_multiplier=float(avg_noise), sampling_rate=sampling_rate)
+            self.accountant.add_round(noise_multiplier=float(min_noise_multiplier), sampling_rate=sampling_rate)
 
         current_epsilon = self.accountant.get_total_epsilon()
 
@@ -222,6 +223,10 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         print(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
 
+        # Get per-round epsilon and sensitivities for plotting
+        epsilon_t_current = self._get_round_epsilon(server_round) if hasattr(self, '_get_round_epsilon') else 0.0
+        current_sensitivities = self.sensitivity_tracker.get_sensitivities() if hasattr(self, 'sensitivity_tracker') else {}
+
         record = {
             "round": server_round,
             "avg_loss": avg_loss,
@@ -229,6 +234,8 @@ class ProgressivePrivacyStrategy(FedAvg):
             "val_loss": val_loss,
             "convergence_score": self.convergence_score,
             "total_epsilon": current_epsilon,
+            "epsilon_t": epsilon_t_current,  # Per-round epsilon for Graph 5
+            "sensitivities": dict(current_sensitivities),  # Per-layer sensitivities for Graph 6
             "avg_latency": np.mean([r.metrics.get("client_latency", 0) for _, r in results]),
             "avg_resource": np.mean([r.metrics.get("resource_score", 0) for _, r in results]),
             "clip_norm": clip_norm,
