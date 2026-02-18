@@ -67,7 +67,8 @@ class QPrivIoTClient(NumPyClient):
 
             ds_name = str(self.run_config.get("dataset", "cifar10"))
             local_epochs = int(self.run_config.get("local-epochs", 1))
-            learning_rate = float(self.run_config.get("learning-rate", 0.01))
+            # Use dynamic learning rate from server if available, otherwise fall back to run_config
+            learning_rate = float(config.get("learning_rate", self.run_config.get("learning-rate", 0.01)))
 
             train_loader, _ = load_data(self.partition_id, self.num_partitions, 32, ds_name)
             device = torch.device("cuda" if torch.cuda.is_available() else "mps")

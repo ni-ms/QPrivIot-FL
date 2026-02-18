@@ -32,6 +32,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                  use_adaptive_dp=False,
                  target_epsilon=3.0,
                  num_rounds=100,
+                 learning_rate=0.01,
                  **kwargs):
         super().__init__(**kwargs)
         self.results_file = os.path.abspath(results_file)
@@ -41,6 +42,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.use_adaptive_dp = use_adaptive_dp
         self.target_epsilon = target_epsilon
         self.num_rounds = num_rounds
+        self.learning_rate = learning_rate
         
         self.loss_history = []
         self.convergence_score = 0.0
@@ -99,6 +101,11 @@ class ProgressivePrivacyStrategy(FedAvg):
         secagg_status = "Active" if self.use_secagg and len(clients) > 0 else "Off"
         print(f"\n--- Round {server_round} [DP: {dp_status}, SecAgg: {secagg_status}, Conv: {self.convergence_score:.2f}, ε_t: {epsilon_t:.3f}] ---")
 
+        # Baseline learning rate passed during init
+        base_lr = self.learning_rate
+        # Apply 50% decay after Round 25
+        current_lr = base_lr * 0.5 if server_round > 25 else base_lr
+
         new_instructions = []
         total_clients = len(clients)
 
@@ -110,6 +117,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                 "convergence_score": self.convergence_score,
                 "round": server_round,
                 "epsilon_t": epsilon_t,
+                "learning_rate": current_lr,
                 "sensitivities": json.dumps(sensitivities)
             }
 
@@ -299,6 +307,7 @@ def server_fn(context: Context):
         fraction_evaluate=context.run_config.get("fraction-evaluate", 1.0),
         min_fit_clients=context.run_config.get("min-fit-clients", 1),
         min_available_clients=context.run_config.get("min-available-clients", 1),
+        learning_rate=context.run_config.get("learning-rate", 0.01),
         initial_parameters=init_parameters,
     )
 
