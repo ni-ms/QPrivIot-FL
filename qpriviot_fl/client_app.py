@@ -6,6 +6,7 @@ import traceback
 from flwr.client import NumPyClient
 from flwr.clientapp import ClientApp
 from flwr.common import Context
+import json
 
 from qpriviot_fl.config import DEFAULT_CONFIG as CONFIG
 from qpriviot_fl.device_profile import profile_device
@@ -33,21 +34,19 @@ class QPrivIoTClient(NumPyClient):
         self.num_partitions = int(self.node_config.get("num-partitions", 1))
 
     def fit(self, parameters, config):
+        """Train parameters on the locally held dataset."""
         # Default metric values for telemetry
         avg_sensitivity = 0.0
         avg_clip_norm = 0.0
-        min_noise = 0.0
+        mean_noise = 0.0
         dp_mode = "None"
         dp_was_applied = False
-        
-        """Train parameters on the locally held dataset."""
+        sensitivities_map = {}  # Initialize here so it's always in scope
         try:
 
             use_secagg = bool(config.get("use_secagg", False))
             use_dp = bool(config.get("use_dp", False))
             use_adaptive_dp = bool(config.get("use_adaptive_dp", False))
-
-            base_noise = float(self.run_config.get("base-noise", 1.2))
 
             base_latency = float(getattr(CONFIG.resource, "base_latency_seconds", 0.2)) / max(self.res_score, 0.01)
             time.sleep(min(base_latency, 0.5))
@@ -71,7 +70,7 @@ class QPrivIoTClient(NumPyClient):
             learning_rate = float(config.get("learning_rate", self.run_config.get("learning-rate", 0.01)))
 
             train_loader, _ = load_data(self.partition_id, self.num_partitions, 32, ds_name)
-            device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+            device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
             model = make_model(ds_name).to(device)
 
             self._set_parameters(model, parameters, device)
@@ -92,7 +91,7 @@ class QPrivIoTClient(NumPyClient):
                 sensitivities_str = config.get("sensitivities", "{}")
                 try:
                     sensitivities_map = json.loads(sensitivities_str)
-                except:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     sensitivities_map = {}
 
                 # Adjust noise multiplier based on Readiness Score R_i
@@ -112,9 +111,9 @@ class QPrivIoTClient(NumPyClient):
                 
                 # If Round 1 (no sensitivities), use uniform base noise
                 if not noise_mults:
-                    model_keys = list(model.state_dict().keys())
-                    noise_mults = {k: base_sigma for k in model_keys}
-                    clip_norms_map = {k: base_clip_norm_res for k in model_keys}
+                    param_keys = [n for n, _ in model.named_parameters()]
+                    noise_mults = {k: base_sigma for k in param_keys}
+                    clip_norms_map = {k: base_clip_norm_res for k in param_keys}
 
                 # Scale noise multipliers by per-client factor sigma_i
                 for k in noise_mults:
@@ -131,8 +130,9 @@ class QPrivIoTClient(NumPyClient):
                 fixed_noise_multiplier = 1.0 / max(epsilon_t, 1e-6)
                 fixed_clip_norm = 1.0
                 
-                noise_mults = {name: fixed_noise_multiplier for name in model.state_dict().keys()}
-                clip_norms_map = {name: fixed_clip_norm for name in model.state_dict().keys()}
+                param_keys = [n for n, _ in model.named_parameters()]
+                noise_mults = {name: fixed_noise_multiplier for name in param_keys}
+                clip_norms_map = {name: fixed_clip_norm for name in param_keys}
                 dp_was_applied = True
                 dp_mode = "Fixed"
                 print(f"CLIENT {self.partition_id}: Fixed DP (ε_t={epsilon_t:.3f}, Noise={fixed_noise_multiplier:.3f}, Clip={fixed_clip_norm:.2f})")
@@ -142,19 +142,20 @@ class QPrivIoTClient(NumPyClient):
                 # Use a larger default clip norm for No DP to prevent explosion in FL
                 # 5.0 chosen empirically for CIFAR-10 CNNs
                 fixed_clip_norm = 5.0
-                clip_norms_map = {name: fixed_clip_norm for name in model.state_dict().keys()}
+                param_keys = [n for n, _ in model.named_parameters()]
+                clip_norms_map = {name: fixed_clip_norm for name in param_keys}
                 # Initialize empty noise multipliers for consistency
-                noise_mults = {name: 0.0 for name in model.state_dict().keys()}
+                noise_mults = {name: 0.0 for name in param_keys}
                 print(f"CLIENT {self.partition_id}: Baseline Mode (No DP)")
             
             # Record performance metrics for telemetry
             avg_clip_norm = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
-            # Record minimum noise for conservative privacy accounting (worst-case)
-            min_noise = float(np.min(list(noise_mults.values()))) if noise_mults else 0.0
+            # Report mean noise for server-side privacy accounting
+            mean_noise = float(np.mean(list(noise_mults.values()))) if noise_mults else 0.0
             
             # If round has sensitivity data, record avg sensitivity
-            if "sensitivities" in locals() and sensitivities_map:
-                 avg_sensitivity = np.mean(list(sensitivities_map.values()))
+            if sensitivities_map:
+                avg_sensitivity = float(np.mean(list(sensitivities_map.values())))
 
             # Training
             train_loss = float(train(model, train_loader, epochs=local_epochs, lr=learning_rate, device=device))
@@ -163,22 +164,25 @@ class QPrivIoTClient(NumPyClient):
                 num_samples = len(train_loader.dataset)
                 apply_dp_noise_per_layer(model, initial_weights_list, noise_mults, clip_norms_map, num_samples=num_samples)
 
-            # Evaluate
-            eval_params = self._get_parameters(model)
-            val_loss, val_num_samples, eval_metrics_dict = self.evaluate(eval_params, config)
-
-            updated_params_final = self._get_parameters(model)
+            # Compute deltas using named_parameters (trainable only) for consistency
+            # with apply_dp_noise_per_layer which also uses named_parameters
+            updated_params = [p.detach().cpu().numpy() for p in model.parameters()]
             initial_weights_numpy = [p.cpu().numpy() for p in initial_weights_list]
 
             updated_deltas = [
-                updated_params_final[i] - initial_weights_numpy[i]
-                for i in range(len(updated_params_final))
+                updated_params[i] - initial_weights_numpy[i]
+                for i in range(len(updated_params))
             ]
 
+            # Evaluate on validation set
+            eval_params = self._get_parameters(model)
+            val_loss, val_num_samples, eval_metrics_dict = self.evaluate(eval_params, config)
+
             metrics = {
-                "train_loss": train_loss, 
+                "train_loss": train_loss,
+                "num_examples": len(train_loader.dataset),
                 "resource_score": self.res_score, 
-                "avg_noise": min_noise,  # Reported as avg_noise for compatibility but represents min_noise
+                "avg_noise": mean_noise,
                 "client_latency": base_latency, 
                 "secagg_active": use_secagg, 
                 "dp_mode": dp_mode,
@@ -221,7 +225,7 @@ class QPrivIoTClient(NumPyClient):
             ds_name = str(self.run_config.get("dataset", "cifar10"))
             _, val_loader = load_data(self.partition_id, self.num_partitions, 32, ds_name)
 
-            device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+            device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
             model = make_model(ds_name).to(device)
             self._set_parameters(model, parameters, device)
 
