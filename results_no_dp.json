@@ -1,0 +1,67 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "avg_loss": 0.6848693433217704,
+      "val_accuracy": 0.5375000000000001,
+      "val_loss": 0.7037828546017408,
+      "convergence_score": 0.0,
+      "total_epsilon": 0.0,
+      "epsilon_t": 0.3,
+      "sensitivities": {
+        "fc1.weight": 0.6764449821042874,
+        "fc1.bias": 0.5434868499729294,
+        "fc2.weight": 1.053644561411629,
+        "fc2.bias": 1.7264236065111542
+      },
+      "avg_latency": 0.1381833734694536,
+      "avg_resource": 0.4114913284655448,
+      "clip_norm": 5.0,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "None"
+    },
+    {
+      "round": 2,
+      "avg_loss": 0.682622448168695,
+      "val_accuracy": 0.51375,
+      "val_loss": 0.7147647738456726,
+      "convergence_score": 0.0,
+      "total_epsilon": 0.0,
+      "epsilon_t": 0.3,
+      "sensitivities": {
+        "fc1.weight": 0.3265435532227534,
+        "fc1.bias": 0.861739986860647,
+        "fc2.weight": 0.8553429161738848,
+        "fc2.bias": 1.9563735437427148
+      },
+      "avg_latency": 0.13818337346945364,
+      "avg_resource": 0.4114913284655448,
+      "clip_norm": 5.0,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "None"
+    },
+    {
+      "round": 3,
+      "avg_loss": 0.6816357826814056,
+      "val_accuracy": 0.49874999999999997,
+      "val_loss": 0.7407507095485926,
+      "convergence_score": 0.9934276895347899,
+      "total_epsilon": 0.0,
+      "epsilon_t": 0.3,
+      "sensitivities": {
+        "fc1.weight": 0.518587617597767,
+        "fc1.bias": 0.7319273494534546,
+        "fc2.weight": 0.9077439644822447,
+        "fc2.bias": 1.8417410684665336
+      },
+      "avg_latency": 0.13818337346945364,
+      "avg_resource": 0.4114913284655448,
+      "clip_norm": 5.0,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "None"
+    }
+  ]
+}

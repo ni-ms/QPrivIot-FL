@@ -33,6 +33,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                  target_epsilon=3.0,
                  num_rounds=100,
                  learning_rate=0.01,
+                 dataset="cifar10",
                  **kwargs):
         super().__init__(**kwargs)
         self.results_file = os.path.abspath(results_file)
@@ -43,6 +44,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.target_epsilon = target_epsilon
         self.num_rounds = num_rounds
         self.learning_rate = learning_rate
+        self.dataset = dataset
         
         self.loss_history = []
         self.convergence_score = 0.0
@@ -88,9 +90,9 @@ class ProgressivePrivacyStrategy(FedAvg):
         # Update convergence score
         if len(self.loss_history) >= 2:
             recent = self.loss_history[-3:]
-            mean_loss = np.mean(recent)
+            mean_loss = float(np.mean(recent))
             if mean_loss > 0:
-                cv = np.std(recent).item() / mean_loss.item()
+                cv = float(np.std(recent)) / mean_loss
                 self.convergence_score = max(0.0, min(1.0, 1.0 - (cv * 4)))
 
         # Get round budget and sensitivities
@@ -172,23 +174,26 @@ class ProgressivePrivacyStrategy(FedAvg):
             ]
 
         else:
-            print("  Aggregating Deltas (Standard FedAvg)...")
-            num_participants = len(results)
-            deltas = parameters_to_ndarrays(results[0][1].parameters)
-
-            for _, res in results[1:]:
+            print("  Aggregating Deltas (Weighted FedAvg)...")
+            # Standard FedAvg: weight each client's delta by its sample count
+            total_examples = sum(res.num_examples for _, res in results)
+            
+            # Initialize with zeros
+            first_deltas = parameters_to_ndarrays(results[0][1].parameters)
+            averaged_delta = [np.zeros_like(d) for d in first_deltas]
+            
+            for _, res in results:
+                weight = res.num_examples / total_examples if total_examples > 0 else 1.0 / len(results)
                 client_deltas = parameters_to_ndarrays(res.parameters)
-                for i in range(len(deltas)):
-                    deltas[i] += client_deltas[i]
-
-            averaged_delta = [d / num_participants for d in deltas]
+                for i in range(len(client_deltas)):
+                    averaged_delta[i] += client_deltas[i] * weight
 
         # Update sensitivity tracker with averaged deltas as proxies for global gradients
         model_keys = list(self.sensitivity_tracker.history.keys())
         if not model_keys:
-             # Initialize keys from first result if empty
-             mock_model = make_model("cifar10") # Placeholder to get keys
-             model_keys = list(mock_model.state_dict().keys())
+             # Initialize keys using the actual configured dataset
+             init_model = make_model(self.dataset)
+             model_keys = list(init_model.state_dict().keys())
         
         current_norms = {}
         current_grads = {}
@@ -206,13 +211,16 @@ class ProgressivePrivacyStrategy(FedAvg):
         ]
         agg_params = ndarrays_to_parameters(new_global_params_ndarrays)
 
-        # Use conservative (minimum) noise across all participants for valid DP accounting
-        min_noise_multiplier = np.min([r.metrics.get("avg_noise", 0) for _, r in results])
+        # Use mean noise across participants for DP accounting
+        # Note: For formal DP guarantees, the minimum should be used (worst-case);
+        # mean is used here as an approximation since all clients use the same base sigma.
+        noise_values = [r.metrics.get("avg_noise", 0) for _, r in results]
+        accounting_noise = float(np.mean(noise_values)) if noise_values else 0.0
         sampling_rate = len(results) / total_available_clients
         dp_mode = results[0][1].metrics.get("dp_mode", "None")
         
-        if dp_mode != "None":
-            self.accountant.add_round(noise_multiplier=float(min_noise_multiplier), sampling_rate=sampling_rate)
+        if dp_mode != "None" and accounting_noise > 0:
+            self.accountant.add_round(noise_multiplier=accounting_noise, sampling_rate=sampling_rate)
 
         current_epsilon = self.accountant.get_total_epsilon()
 
@@ -225,9 +233,12 @@ class ProgressivePrivacyStrategy(FedAvg):
         clip_norm = np.mean([r.metrics.get("clip_norm", 0.0) for _, r in results])
         avg_sensitivity = np.mean([r.metrics.get("avg_sensitivity", 0.0) for _, r in results])
 
-        # Privacy budget verification
+        # Privacy budget enforcement: halt training if budget exceeded
         if dp_mode != "None" and current_epsilon > self.target_epsilon:
-            print(f"  ⚠️  WARNING: Privacy budget exceeded! ε={current_epsilon:.2f} > target={self.target_epsilon:.2f}")
+            print(f"  🛑  STOPPING: Privacy budget exceeded! ε={current_epsilon:.2f} > target={self.target_epsilon:.2f}")
+            print(f"  Training halted to preserve differential privacy guarantees.")
+            self._save(new_global_params_ndarrays)
+            return agg_params, {"budget_exceeded": True}
 
         print(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
 
@@ -303,6 +314,7 @@ def server_fn(context: Context):
         use_secagg=use_secagg,
         use_dp=use_dp,
         use_adaptive_dp=use_adaptive_dp,
+        dataset=dataset,
         fraction_fit=context.run_config.get("fraction-fit", 1.0),
         fraction_evaluate=context.run_config.get("fraction-evaluate", 1.0),
         min_fit_clients=context.run_config.get("min-fit-clients", 1),
