@@ -172,21 +172,58 @@ class SensitivityTracker:
                 self.second_moments[name] = 0.9 * self.second_moments[name] + 0.1 * moment
 
     def get_sensitivities(self) -> Dict[str, float]:
-        """Compute sensitivity score s_j for each parameter group."""
-        sensitivities = {}
+        """Compute sensitivity score s_j for each parameter group.
+        
+        Uses two independently normalized components to ensure layers
+        with different gradient characteristics get different scores:
+          s_j = (1 - alpha) * norm_std_j_normalized + alpha * loss_impact_j_normalized
+        """
+        if not self.history:
+            return {}
+
+        # Step 1: Compute raw components per layer
+        raw_std = {}
+        raw_impact = {}
         for name, norms in self.history.items():
-            grad_norm_std = np.std(norms) if len(norms) > 1 else 0.1
-            loss_impact = abs(self.second_moments[name])
-            
-            # Normalize and combine
-            s_j = (1 - self.alpha) * grad_norm_std + self.alpha * loss_impact
+            if len(norms) > 1:
+                raw_std[name] = float(np.std(norms))
+            else:
+                # Round 1 fallback: use the norm itself as a differentiator
+                # (layers with larger gradients are more sensitive)
+                raw_std[name] = norms[0] if norms else 0.1
+            raw_impact[name] = abs(self.second_moments.get(name, 0.0))
+
+        # Step 2: Normalize each component independently to mean 1.0
+        # This prevents one component from dominating and ensures
+        # even small differences in gradient norms translate to different s_j
+        names = list(self.history.keys())
+        
+        std_values = np.array([raw_std[n] for n in names])
+        std_mean = np.mean(std_values)
+        if std_mean > 1e-10:
+            norm_std = {n: raw_std[n] / std_mean for n in names}
+        else:
+            norm_std = {n: 1.0 for n in names}
+
+        impact_values = np.array([raw_impact[n] for n in names])
+        impact_mean = np.mean(impact_values)
+        if impact_mean > 1e-10:
+            norm_impact = {n: raw_impact[n] / impact_mean for n in names}
+        else:
+            norm_impact = {n: 1.0 for n in names}
+
+        # Step 3: Combine with alpha weighting
+        sensitivities = {}
+        for name in names:
+            s_j = (1 - self.alpha) * norm_std[name] + self.alpha * norm_impact[name]
             sensitivities[name] = max(0.1, s_j)
-            
-        # Normalize sensitivities to mean 1.0 to keep clipping norms stable
+
+        # Step 4: Final normalization to mean 1.0 (preserves relative differences)
         if sensitivities:
             avg = np.mean(list(sensitivities.values()))
-            sensitivities = {k: v / (avg + 1e-8) for k, v in sensitivities.items()}
-            
+            if avg > 1e-10:
+                sensitivities = {k: v / avg for k, v in sensitivities.items()}
+
         return sensitivities
 
 
