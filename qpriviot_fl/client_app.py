@@ -69,6 +69,13 @@ class QPrivIoTClient(NumPyClient):
             # Use dynamic learning rate from server if available, otherwise fall back to run_config
             learning_rate = float(config.get("learning_rate", self.run_config.get("learning-rate", 0.01)))
 
+            convergence_score = float(config.get("convergence_score", 0.0))
+            fine_tuning_active = False
+            if convergence_score > 0.8:
+                learning_rate *= 0.5
+                fine_tuning_active = True
+                print(f"CLIENT {self.partition_id}: High convergence ({convergence_score:.2f}) - adjusting LR and noise for fine-tuning.")
+
             train_loader, _ = load_data(self.partition_id, self.num_partitions, 32, ds_name)
             device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
             model = make_model(ds_name).to(device)
@@ -118,6 +125,10 @@ class QPrivIoTClient(NumPyClient):
                 # Scale noise multipliers by per-client factor sigma_i
                 for k in noise_mults:
                     noise_mults[k] *= sigma_i_factor
+                    
+                if fine_tuning_active:
+                    for k in noise_mults:
+                        noise_mults[k] *= 0.8
 
                 dp_was_applied = True
                 dp_mode = "Adaptive"
@@ -132,6 +143,9 @@ class QPrivIoTClient(NumPyClient):
                 
                 param_keys = [n for n, _ in model.named_parameters()]
                 noise_mults = {name: fixed_noise_multiplier for name in param_keys}
+                if fine_tuning_active:
+                    for k in noise_mults:
+                        noise_mults[k] *= 0.8
                 clip_norms_map = {name: fixed_clip_norm for name in param_keys}
                 dp_was_applied = True
                 dp_mode = "Fixed"
@@ -194,13 +208,15 @@ class QPrivIoTClient(NumPyClient):
             }
 
             if use_secagg:
-                print(f"CLIENT {self.partition_id}: Applying SecAgg (Quantization and Masking)")
+                secagg_quantization_bound = float(config.get("secagg_quantization_bound", 10.0))
+                metrics["secagg_quantization_bound"] = secagg_quantization_bound
+                print(f"CLIENT {self.partition_id}: Applying SecAgg (Quantization bound: {secagg_quantization_bound})")
 
                 secagg_seed = int(config.get("secagg_seed", 0))
                 secagg_client_index = int(config.get("secagg_client_index", 0))
                 secagg_total_clients = int(config.get("secagg_total_clients", 1))
 
-                quantized_deltas = quantize(updated_deltas, clip_range=1.0, range_max=1000000)
+                quantized_deltas = quantize(updated_deltas, clip_range=secagg_quantization_bound, range_max=1000000)
 
                 shapes = [q.shape for q in quantized_deltas]
 
