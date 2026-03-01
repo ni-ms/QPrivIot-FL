@@ -110,10 +110,12 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         new_instructions = []
         total_clients = len(clients)
+        secagg_quantization_bound = 10.0
 
         for idx, client_proxy in enumerate(clients):
             config = {
                 "use_secagg": self.use_secagg,
+                "secagg_quantization_bound": secagg_quantization_bound,
                 "use_dp": self.use_dp,
                 "use_adaptive_dp": self.use_adaptive_dp,
                 "convergence_score": self.convergence_score,
@@ -154,7 +156,8 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         averaged_delta = []
         if is_secagg_round:
-            print("  Aggregating Masked Updates (SecAgg: Summing Integers)...")
+            quantization_bound = results[0][1].metrics.get("secagg_quantization_bound", 10.0)
+            print(f"  Aggregating Masked Updates (SecAgg: Summing Integers, bound: {quantization_bound})...")
 
             first_res_params = parameters_to_ndarrays(results[0][1].parameters)
             aggregated_integers_delta = [
@@ -166,7 +169,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                 for i in range(len(masked_delta_params)):
                     aggregated_integers_delta[i] += masked_delta_params[i].astype(np.int64)
 
-            final_floats_delta = dequantize(aggregated_integers_delta, clip_range=1.0, range_max=1000000)
+            final_floats_delta = dequantize(aggregated_integers_delta, clip_range=quantization_bound, range_max=1000000)
 
             num_participants = len(results)
             averaged_delta = [
