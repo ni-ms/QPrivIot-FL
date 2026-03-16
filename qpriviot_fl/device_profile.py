@@ -15,7 +15,8 @@ def profile_device(config=DEFAULT_CONFIG):
     if not hasattr(_thread_local, 'client_id'):
         _thread_local.client_id = (os.getpid() + threading.get_ident()) % 1000
 
-    random.seed(f"device_profile_{_thread_local.client_id}")
+    # Remove fixed seed to allow dynamic battery/network status across rounds
+    # random.seed(f"device_profile_{_thread_local.client_id}")
 
     device_types = list(config.resource.device_distribution.keys())
     device_probs = list(config.resource.device_distribution.values())

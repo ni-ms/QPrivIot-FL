@@ -1,0 +1,54 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "avg_loss": 1.903516245457777,
+      "val_accuracy": 0.1046875,
+      "val_loss": 322.3912970875018,
+      "convergence_score": 0.0,
+      "total_epsilon": 0.6149717227623746,
+      "epsilon_t": 0.15811388300841897,
+      "sensitivities": {
+        "conv1.weight": 0.6546650840588764,
+        "conv1.bias": 0.47032768985856793,
+        "conv2.weight": 1.2226315978442734,
+        "conv2.bias": 0.562099241741347,
+        "fc1.weight": 3.2626961665080083,
+        "fc1.bias": 0.48338215630133685,
+        "fc2.weight": 0.6876287407456131,
+        "fc2.bias": 0.656569322941977
+      },
+      "avg_latency": 0.24750484156634267,
+      "avg_resource": 0.33891100337366575,
+      "clip_norm": 1.0,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "Fixed"
+    },
+    {
+      "round": 2,
+      "avg_loss": 2.008960009086284,
+      "val_accuracy": 0.1082,
+      "val_loss": 169.7462768280468,
+      "convergence_score": 0.0,
+      "total_epsilon": 0.8744046468507494,
+      "epsilon_t": 0.15811388300841897,
+      "sensitivities": {
+        "conv1.weight": 1.5475660814831604,
+        "conv1.bias": 0.4878967484641468,
+        "conv2.weight": 0.8906455024454825,
+        "conv2.bias": 1.185598412754306,
+        "fc1.weight": 0.5994865568381967,
+        "fc1.bias": 0.7136481852600107,
+        "fc2.weight": 1.2326294971171023,
+        "fc2.bias": 1.3425290156375946
+      },
+      "avg_latency": 0.21661211406509195,
+      "avg_resource": 0.3052929973626589,
+      "clip_norm": 1.0,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "Fixed"
+    }
+  ]
+}

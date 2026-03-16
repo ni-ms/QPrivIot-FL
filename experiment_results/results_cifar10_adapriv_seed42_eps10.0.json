@@ -1,0 +1,79 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "avg_loss": 1.8825674013442297,
+      "val_accuracy": 0.21833750000000002,
+      "val_loss": 2.4750186810002157,
+      "convergence_score": 0.0,
+      "total_epsilon": 5.004576625504129,
+      "epsilon_t": 2.3717082451262845,
+      "sensitivities": {
+        "conv1.weight": 1.2208278272937012,
+        "conv1.bias": 0.09821383842101922,
+        "conv2.weight": 0.8066422581505286,
+        "conv2.bias": 0.09821383842101922,
+        "fc1.weight": 1.9776246747218396,
+        "fc1.bias": 0.09821383842101922,
+        "fc2.weight": 0.7066849665094621,
+        "fc2.bias": 2.99357875806141
+      },
+      "avg_latency": 0.28705807638878356,
+      "avg_resource": 0.2514249232384504,
+      "clip_norm": 0.2514249232384504,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "Adaptive"
+    },
+    {
+      "round": 2,
+      "avg_loss": 1.3455308707561462,
+      "val_accuracy": 0.2775625,
+      "val_loss": 1.9361409864867458,
+      "convergence_score": 0.0,
+      "total_epsilon": 7.271043800725279,
+      "epsilon_t": 2.333015023843622,
+      "sensitivities": {
+        "conv1.weight": 1.27970079835056,
+        "conv1.bias": 0.09847918249418629,
+        "conv2.weight": 0.7923727445995977,
+        "conv2.bias": 0.09847918249418629,
+        "fc1.weight": 2.1818335841334804,
+        "fc1.bias": 0.09847918249418629,
+        "fc2.weight": 0.5916513707115296,
+        "fc2.bias": 2.8590039547222728
+      },
+      "avg_latency": 0.49232642749256433,
+      "avg_resource": 0.11480211501620635,
+      "clip_norm": 0.15038414188189433,
+      "avg_sensitivity": 0.9999999999999999,
+      "secagg_active": false,
+      "dp_mode": "Adaptive"
+    },
+    {
+      "round": 3,
+      "avg_loss": 1.2418207010361038,
+      "val_accuracy": 0.33266249999999997,
+      "val_loss": 1.8023543393554777,
+      "convergence_score": 0.3345474823619191,
+      "total_epsilon": 8.957504029067815,
+      "epsilon_t": 2.2207229220863054,
+      "sensitivities": {
+        "conv1.weight": 1.2182577420531722,
+        "conv1.bias": 0.09825462434724082,
+        "conv2.weight": 0.7608748070824488,
+        "conv2.bias": 0.09825462434724082,
+        "fc1.weight": 2.289974299906158,
+        "fc1.bias": 0.09825462434724082,
+        "fc2.weight": 0.9551298651950931,
+        "fc2.bias": 2.4809994127214052
+      },
+      "avg_latency": 0.32202671902446534,
+      "avg_resource": 0.19350493328750262,
+      "clip_norm": 0.2596267664131353,
+      "avg_sensitivity": 0.9999999999999998,
+      "secagg_active": false,
+      "dp_mode": "Adaptive"
+    }
+  ]
+}
