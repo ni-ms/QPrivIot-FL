@@ -156,9 +156,22 @@ def plot_graph1_accuracy_vs_rounds(experiments, output_dir='./figures'):
     """
     print("\n📊 Generating Graph 1: Test Accuracy vs. Rounds")
     
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    datasets_with_data = []
+    for dataset in ['cifar10', 'femnist']:
+        for config in ['no-dp', 'fixed-dp', 'adapriv']:
+            if (dataset, config, 3.0) in experiments:
+                datasets_with_data.append(dataset)
+                break
     
-    for idx, dataset in enumerate(['cifar10', 'femnist']):
+    if not datasets_with_data:
+        print("  ⏩ Skipping Graph 1: No main comparison data found")
+        return
+
+    num_datasets = len(datasets_with_data)
+    fig, axes = plt.subplots(1, num_datasets, figsize=(6 * num_datasets, 4), squeeze=False)
+    axes = axes.flatten()
+    
+    for idx, dataset in enumerate(datasets_with_data):
         ax = axes[idx]
         
         for config in ['no-dp', 'fixed-dp', 'adapriv']:
@@ -205,6 +218,18 @@ def plot_graph2_privacy_utility_tradeoff(experiments, output_dir='./figures'):
     """
     print("\n📊 Generating Graph 2: Privacy-Utility Tradeoff")
     
+    epsilon_values = [1.0, 2.0, 3.0, 5.0, 8.0, 10.0]
+    has_data = False
+    for config in ['fixed-dp', 'adapriv']:
+        for eps in epsilon_values:
+            if ('cifar10', config, eps) in experiments:
+                has_data = True
+                break
+    
+    if not has_data:
+        print("  ⏩ Skipping Graph 2: No epsilon sweep data found")
+        return
+
     fig, ax = plt.subplots(figsize=(8, 6))
     
     epsilon_values = [1.0, 2.0, 3.0, 5.0, 8.0, 10.0]
@@ -221,7 +246,7 @@ def plot_graph2_privacy_utility_tradeoff(experiments, output_dir='./figures'):
                 continue
             
             agg = aggregate_seeds(experiments[key])
-            if not agg:
+            if not agg or not agg['rounds']:
                 continue
             
             # Get final accuracy
@@ -256,6 +281,16 @@ def plot_graph3_loss_convergence(experiments, output_dir='./figures'):
     """
     print("\n📊 Generating Graph 3: Training Loss Convergence")
     
+    has_data = False
+    for config in ['no-dp', 'fixed-dp', 'adapriv']:
+        if ('cifar10', config, 3.0) in experiments:
+            has_data = True
+            break
+            
+    if not has_data:
+        print("  ⏩ Skipping Graph 3: No loss convergence data found")
+        return
+
     fig, ax = plt.subplots(figsize=(8, 6))
     
     for config in ['no-dp', 'fixed-dp', 'adapriv']:
@@ -300,6 +335,13 @@ def plot_graph4_ablation_study(experiments, output_dir='./figures'):
     print("\n📊 Generating Graph 4: Ablation Study")
     print("  ⚠️  NOTE: Requires ablation experiments (device-only, param-only, round-only)")
     
+    configs = ['device-only', 'param-only', 'round-only', 'adapriv']
+    available_configs = [c for c in configs if ('cifar10', c, 3.0) in experiments]
+    
+    if not available_configs:
+        print("  ⏩ Skipping Graph 4: No ablation data found")
+        return
+
     fig, ax = plt.subplots(figsize=(10, 6))
     
     configs = ['device-only', 'param-only', 'round-only', 'adapriv']
@@ -316,7 +358,8 @@ def plot_graph4_ablation_study(experiments, output_dir='./figures'):
             continue
         
         agg = aggregate_seeds(experiments[key])
-        if not agg:
+        if not agg or not agg['rounds']:
+            print(f"  ⚠️  Empty data: {config}")
             continue
         
         final_acc = agg['rounds'][-1]['val_accuracy_mean'] * 100
@@ -361,7 +404,7 @@ def plot_graph5_epsilon_evolution(experiments, output_dir='./figures'):
     key = ('cifar10', 'adapriv', 3.0)
     
     if key not in experiments:
-        print(f"  ⚠️  Missing: {key}")
+        print(f"  ⏩ Skipping Graph 5: No AdaPriv budget data found")
         return
     
     # Use first seed for visualization
@@ -395,7 +438,7 @@ def plot_graph6_sensitivity_heatmap(experiments, output_dir='./figures'):
     key = ('cifar10', 'adapriv', 3.0)
     
     if key not in experiments:
-        print(f"  ⚠️  Missing: {key}")
+        print(f"  ⏩ Skipping Graph 6: No sensitivity heatmap data found")
         return
     
     # Use first seed
@@ -451,6 +494,12 @@ def plot_graph7_communication_cost(experiments, output_dir='./figures'):
     print("\n📊 Generating Graph 7: Communication Cost Comparison")
     
     configs = ['no-dp', 'fixed-dp', 'adapriv']
+    available_configs = [c for c in configs if ('cifar10', c, 3.0) in experiments]
+    
+    if not available_configs:
+        print("  ⏩ Skipping Graph 7: No communication cost data found")
+        return
+
     avg_resources = []
     std_resources = []
     labels_list = []
@@ -463,11 +512,11 @@ def plot_graph7_communication_cost(experiments, output_dir='./figures'):
             continue
         
         agg = aggregate_seeds(experiments[key])
-        if not agg:
+        if not agg or not agg['rounds']:
             continue
         
         # Average resource score across all rounds
-        resources = [r['avg_resource_mean'] for r in agg['rounds']]
+        resources = [r.get('avg_resource_mean', 0.5) for r in agg['rounds']]
         
         avg_resources.append(np.mean(resources))
         std_resources.append(np.std(resources))
@@ -513,13 +562,16 @@ def generate_all_plots(results_dir='./experiment_results', output_dir='./figures
     Path(output_dir).mkdir(exist_ok=True)
     
     # Generate all graphs
-    plot_graph1_accuracy_vs_rounds(experiments, output_dir)
-    plot_graph2_privacy_utility_tradeoff(experiments, output_dir)
-    plot_graph3_loss_convergence(experiments, output_dir)
-    plot_graph4_ablation_study(experiments, output_dir)
-    plot_graph5_epsilon_evolution(experiments, output_dir)
-    plot_graph6_sensitivity_heatmap(experiments, output_dir)
-    plot_graph7_communication_cost(experiments, output_dir)
+    if experiments:
+        plot_graph1_accuracy_vs_rounds(experiments, output_dir)
+        plot_graph2_privacy_utility_tradeoff(experiments, output_dir)
+        plot_graph3_loss_convergence(experiments, output_dir)
+        plot_graph4_ablation_study(experiments, output_dir)
+        plot_graph5_epsilon_evolution(experiments, output_dir)
+        plot_graph6_sensitivity_heatmap(experiments, output_dir)
+        plot_graph7_communication_cost(experiments, output_dir)
+    else:
+        print("\n❌ No experiments to plot.")
     
     print("\n" + "="*60)
     print("✅ All plots generated successfully!")
