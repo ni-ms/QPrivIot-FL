@@ -54,20 +54,29 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.secagg_seed = 1000
         self._client_manager: ClientManager | None = None
         self.current_parameters: Parameters | None = None
+        self.client_resources = {} # cid -> resource_score
 
     def _get_round_epsilon(self, server_round: int) -> float:
         """
         Calculates per-round epsilon using cosine annealing.
         References: Section 3.4
         """
+        num_rounds = max(self.num_rounds, 1)
+        # Calibration: To last 'num_rounds', each round should cost approx target_epsilon / num_rounds
+        # The 2.0 multiplier is a calibration constant for Renyi Differential Privacy (RDP).
+        # RDP composition theorems involve constants that can cause the privacy budget 
+        # to be exhausted faster than a simple linear sqrt(T) division would suggest.
+        # This buffer ensures the model reaches all T rounds for maximum utility.
+        base_eps = self.target_epsilon / (math.sqrt(num_rounds) * 2.0)
+        
         if not self.use_adaptive_dp:
-            return self.target_epsilon / math.sqrt(self.num_rounds)
+            return base_eps
 
-        epsilon_init = (self.target_epsilon / math.sqrt(self.num_rounds)) * 1.5
-        epsilon_final = (self.target_epsilon / math.sqrt(self.num_rounds)) * 0.5
+        epsilon_init = base_eps * 1.5
+        epsilon_final = base_eps * 0.5
         
         # decay(t, T) = (1 + cos(pi * t / T)) / 2
-        decay = (1 + math.cos(math.pi * (server_round - 1) / self.num_rounds)) / 2
+        decay = (1 + math.cos(math.pi * (server_round - 1) / num_rounds)) / 2
         epsilon_t = epsilon_final + (epsilon_init - epsilon_final) * decay
         return epsilon_t
 
@@ -75,7 +84,32 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.current_parameters = parameters
         self._client_manager = client_manager
 
-        if self.use_secagg:
+        # Resource-aware sampling for AdaPriv: prioritize devices that have reported high scores
+        if self.use_adaptive_dp and self.client_resources:
+            all_clients = client_manager.all()
+            available_cids = list(all_clients.keys())
+            
+            # Sort by remembered resource score (fallback to 0.5)
+            sorted_cids = sorted(available_cids, 
+                               key=lambda cid: self.client_resources.get(cid, 0.5), 
+                               reverse=True)
+            
+            # Sample top 70% high-resource for stability, 30% random for fairness/diversity
+            num_to_sample = int(client_manager.num_available() * self.fraction_fit)
+            num_to_sample = max(num_to_sample, self.min_fit_clients)
+            
+            num_high = int(num_to_sample * 0.7)
+            num_rand = num_to_sample - num_high
+            
+            selected_cids = sorted_cids[:num_high]
+            remaining_cids = sorted_cids[num_high:]
+            
+            if num_rand > 0 and remaining_cids:
+                import random
+                selected_cids.extend(random.sample(remaining_cids, min(num_rand, len(remaining_cids))))
+            
+            clients = [all_clients[cid] for cid in selected_cids]
+        elif self.use_secagg:
             clients = client_manager.sample(
                 num_clients=client_manager.num_available(),
                 min_num_clients=1
@@ -140,9 +174,19 @@ class ProgressivePrivacyStrategy(FedAvg):
             print("  No clients returned results. Skipping aggregation.")
             return None, {}
 
+        # Update local knowledge of client resources
+        for proxy, res in results:
+            score = res.metrics.get("resource_score", 0.5)
+            self.client_resources[proxy.cid] = score
+            # print(f"DEBUG: Cid {proxy.cid} reported resource {score:.2f}")
+
         total_available_clients = 1
         if self._client_manager:
             total_available_clients = self._client_manager.num_available()
+            
+        if self.use_adaptive_dp:
+            avg_res = np.mean(list(self.client_resources.values())) if self.client_resources else 0
+            # print(f"DEBUG: Round {server_round} aggregated. Known resources: {len(self.client_resources)}, Avg: {avg_res:.2f}")
 
         if self.current_parameters is None:
             print(
@@ -177,16 +221,25 @@ class ProgressivePrivacyStrategy(FedAvg):
             ]
 
         else:
-            print("  Aggregating Deltas (Weighted FedAvg)...")
-            # Standard FedAvg: weight each client's delta by its sample count
-            total_examples = sum(res.num_examples for _, res in results)
+            print("  Aggregating Deltas (Resource-Weighted FedAvg)...")
+            # In AdaPriv, we weight updates by both sample count and the reported readiness score
+            # This incentivizes participation from high-resource devices
+            if self.use_adaptive_dp:
+                total_weight = sum(res.num_examples * res.metrics.get("resource_score", 1.0) for _, res in results)
+            else:
+                total_weight = sum(res.num_examples for _, res in results)
             
             # Initialize with zeros
             first_deltas = parameters_to_ndarrays(results[0][1].parameters)
             averaged_delta = [np.zeros_like(d) for d in first_deltas]
             
             for _, res in results:
-                weight = res.num_examples / total_examples if total_examples > 0 else 1.0 / len(results)
+                if self.use_adaptive_dp:
+                    client_weight = res.num_examples * res.metrics.get("resource_score", 1.0)
+                else:
+                    client_weight = res.num_examples
+                
+                weight = client_weight / total_weight if total_weight > 0 else 1.0 / len(results)
                 client_deltas = parameters_to_ndarrays(res.parameters)
                 for i in range(len(client_deltas)):
                     averaged_delta[i] += client_deltas[i] * weight
@@ -238,7 +291,7 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         # Privacy budget enforcement: halt training if budget exceeded
         if dp_mode != "None" and current_epsilon > self.target_epsilon:
-            print(f"  🛑  STOPPING: Privacy budget exceeded! ε={current_epsilon:.2f} > target={self.target_epsilon:.2f}")
+            print(f"  STOPPING: Privacy budget exceeded! ε={current_epsilon:.2f} > target={self.target_epsilon:.2f}")
             print(f"  Training halted to preserve differential privacy guarantees.")
             self._save(new_global_params_ndarrays)
             return agg_params, {"budget_exceeded": True}
@@ -323,6 +376,8 @@ def server_fn(context: Context):
         min_fit_clients=context.run_config.get("min-fit-clients", 1),
         min_available_clients=context.run_config.get("min-available-clients", 1),
         learning_rate=context.run_config.get("learning-rate", 0.01),
+        target_epsilon=context.run_config.get("target-epsilon", 3.0),
+        num_rounds=num_rounds,
         initial_parameters=init_parameters,
     )
 

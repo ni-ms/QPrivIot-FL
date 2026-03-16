@@ -1,0 +1,29 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "avg_loss": 1.9386944762555656,
+      "val_accuracy": 0.3421625,
+      "val_loss": 1.869937834481652,
+      "convergence_score": 0.0,
+      "total_epsilon": 6.869717227623744,
+      "epsilon_t": 1.5811388300841895,
+      "sensitivities": {
+        "conv1.weight": 1.6521856991911947,
+        "conv1.bias": 0.09965742091959585,
+        "conv2.weight": 0.9025510036251952,
+        "conv2.bias": 0.09965742091959585,
+        "fc1.weight": 2.347622558267416,
+        "fc1.bias": 0.1428885373840738,
+        "fc2.weight": 0.9106878515733601,
+        "fc2.bias": 1.8447495081195668
+      },
+      "avg_latency": 0.28664877805141487,
+      "avg_resource": 0.270100505923743,
+      "clip_norm": 1.0,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "Fixed"
+    }
+  ]
+}
