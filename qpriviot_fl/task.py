@@ -68,6 +68,8 @@ def make_model(dataset_name: str):
     return Net()
 
 
+_fds_cache = {}
+
 def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_name: str):
     """Load federated training data (partitioned) and global evaluation data (full test set)."""
 
@@ -80,14 +82,18 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
         return DataLoader(train_ds, batch_size=batch_size, shuffle=True), \
             DataLoader(val_ds, batch_size=batch_size)
 
-    partitioner = IidPartitioner(num_partitions=num_partitions)
-
     if dataset_name == "femnist":
         hub_dataset_name = "flwrlabs/femnist"
     else:
         hub_dataset_name = "uoft-cs/cifar10"
 
-    fds = FederatedDataset(dataset=hub_dataset_name, partitioners={"train": partitioner})
+    cache_key = (hub_dataset_name, num_partitions)
+    if cache_key not in _fds_cache:
+        partitioner = IidPartitioner(num_partitions=num_partitions)
+        fds = FederatedDataset(dataset=hub_dataset_name, partitioners={"train": partitioner})
+        _fds_cache[cache_key] = fds
+    else:
+        fds = _fds_cache[cache_key]
 
     val_set = load_dataset(hub_dataset_name, split="test")
 
@@ -100,14 +106,14 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
         batch["img"] = [transforms(i) for i in batch["img"]]
         return batch
 
-    train_partition = fds.load_partition(partition_id)
+    train_partition = fds.load_partition(partition_id, "train")
     train_partition = train_partition.with_transform(apply_transforms)
     train_partition.set_format('torch')  # <--- PREVIOUS FIX: Set PyTorch format
-    train_loader = DataLoader(train_partition, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
 
     val_set = val_set.with_transform(apply_transforms)
     val_set.set_format('torch')  # <--- PREVIOUS FIX: Set PyTorch format
-    val_loader = DataLoader(val_set, batch_size=batch_size)
+    val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=2, pin_memory=True)
 
     return train_loader, val_loader
 

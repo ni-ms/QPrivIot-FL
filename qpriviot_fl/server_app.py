@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import math
+import random
+import secrets
 import torch
 from typing import List, Optional
 
@@ -51,7 +53,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.accountant = RenyiPrivacyAccountant(target_epsilon=target_epsilon, target_delta=1e-5)
         self.sensitivity_tracker = SensitivityTracker(alpha=0.5)
         self.experiments_log = []
-        self.secagg_seed = 1000
+        self.secagg_seed = secrets.randbits(32)
         self._client_manager: ClientManager | None = None
         self.current_parameters: Parameters | None = None
         self.client_resources = {} # cid -> resource_score
@@ -111,17 +113,19 @@ class ProgressivePrivacyStrategy(FedAvg):
             clients = [all_clients[cid] for cid in selected_cids]
         elif self.use_secagg:
             clients = client_manager.sample(
-                num_clients=client_manager.num_available(),
-                min_num_clients=1
+                num_clients=self.fraction_fit,
+                min_num_clients=self.min_fit_clients
             )
         else:
-            client_instructions = super().configure_fit(server_round, parameters, client_manager)
-            clients = [instr[0] for instr in client_instructions]
+            clients = client_manager.sample(
+                num_clients=self.fraction_fit,
+                min_num_clients=self.min_fit_clients
+            )
 
         if not clients:
             return []
 
-        # Update convergence score
+        # Update convergence score using training loss instead of metrics to avoid oscillation
         if len(self.loss_history) >= 2:
             recent = self.loss_history[-3:]
             mean_loss = float(np.mean(recent))
@@ -139,14 +143,17 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         # Baseline learning rate passed during init
         base_lr = self.learning_rate
-        # Apply 50% decay after Round 25
-        current_lr = base_lr * 0.5 if server_round > 25 else base_lr
+        # Apply 50% decay after reaching 25% of total rounds
+        current_lr = base_lr * 0.5 if server_round > max(1, self.num_rounds * 0.25) else base_lr
 
         new_instructions = []
         total_clients = len(clients)
         secagg_quantization_bound = 10.0
 
         for idx, client_proxy in enumerate(clients):
+            # Clamp sensitivities before JSON serialization to avoid division by zero from float underflow
+            clamped_sensitivities = {k: max(v, 1e-6) for k, v in sensitivities.items()}
+
             config = {
                 "use_secagg": self.use_secagg,
                 "secagg_quantization_bound": secagg_quantization_bound,
@@ -156,7 +163,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                 "round": server_round,
                 "epsilon_t": epsilon_t,
                 "learning_rate": current_lr,
-                "sensitivities": json.dumps(sensitivities)
+                "sensitivities": json.dumps(clamped_sensitivities)
             }
 
             if self.use_secagg:
@@ -170,6 +177,10 @@ class ProgressivePrivacyStrategy(FedAvg):
         return new_instructions
 
     def aggregate_fit(self, server_round, results, failures):
+        """
+        Aggregate fit results using resource-weighted FedAvg.
+        NOTE: clients return DELTAS, not full weights. Do not call super().aggregate_fit()!
+        """
         if not results:
             print("  No clients returned results. Skipping aggregation.")
             return None, {}
@@ -182,7 +193,9 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         total_available_clients = 1
         if self._client_manager:
-            total_available_clients = self._client_manager.num_available()
+            total_available_clients = max(self._client_manager.num_available(), len(results))
+        else:
+            total_available_clients = max(1, len(results))
             
         if self.use_adaptive_dp:
             avg_res = np.mean(list(self.client_resources.values())) if self.client_resources else 0
@@ -225,7 +238,7 @@ class ProgressivePrivacyStrategy(FedAvg):
             # In AdaPriv, we weight updates by both sample count and the reported readiness score
             # This incentivizes participation from high-resource devices
             if self.use_adaptive_dp:
-                total_weight = sum(res.num_examples * res.metrics.get("resource_score", 1.0) for _, res in results)
+                total_weight = sum(max(res.num_examples * res.metrics.get("resource_score", 1.0), 1e-6) for _, res in results)
             else:
                 total_weight = sum(res.num_examples for _, res in results)
             
@@ -235,7 +248,7 @@ class ProgressivePrivacyStrategy(FedAvg):
             
             for _, res in results:
                 if self.use_adaptive_dp:
-                    client_weight = res.num_examples * res.metrics.get("resource_score", 1.0)
+                    client_weight = max(res.num_examples * res.metrics.get("resource_score", 1.0), 1e-6)
                 else:
                     client_weight = res.num_examples
                 
@@ -243,6 +256,23 @@ class ProgressivePrivacyStrategy(FedAvg):
                 client_deltas = parameters_to_ndarrays(res.parameters)
                 for i in range(len(client_deltas)):
                     averaged_delta[i] += client_deltas[i] * weight
+
+        # Use min noise across participants for formal DP guarantees (worst-case)
+        noise_values = [r.metrics.get("avg_noise", 0) for _, r in results]
+        accounting_noise = float(np.min(noise_values)) if noise_values else 0.0
+        sampling_rate = len(results) / total_available_clients
+        dp_mode = results[0][1].metrics.get("dp_mode", "None")
+        
+        if dp_mode != "None" and accounting_noise > 0:
+            self.accountant.add_round(noise_multiplier=accounting_noise, sampling_rate=sampling_rate)
+
+        current_epsilon = self.accountant.get_total_epsilon()
+
+        # Privacy budget enforcement: halt training if budget exceeded
+        if dp_mode != "None" and current_epsilon > self.target_epsilon:
+            print(f"  STOPPING: Privacy budget exceeded! ε={current_epsilon:.2f} > target={self.target_epsilon:.2f}")
+            print(f"  Training halted to preserve differential privacy guarantees.")
+            return None, {"budget_exceeded": True}
 
         # Update sensitivity tracker with averaged deltas as proxies for global gradients
         model_keys = list(self.sensitivity_tracker.history.keys())
@@ -267,19 +297,6 @@ class ProgressivePrivacyStrategy(FedAvg):
         ]
         agg_params = ndarrays_to_parameters(new_global_params_ndarrays)
 
-        # Use mean noise across participants for DP accounting
-        # Note: For formal DP guarantees, the minimum should be used (worst-case);
-        # mean is used here as an approximation since all clients use the same base sigma.
-        noise_values = [r.metrics.get("avg_noise", 0) for _, r in results]
-        accounting_noise = float(np.mean(noise_values)) if noise_values else 0.0
-        sampling_rate = len(results) / total_available_clients
-        dp_mode = results[0][1].metrics.get("dp_mode", "None")
-        
-        if dp_mode != "None" and accounting_noise > 0:
-            self.accountant.add_round(noise_multiplier=accounting_noise, sampling_rate=sampling_rate)
-
-        current_epsilon = self.accountant.get_total_epsilon()
-
         losses = [r.metrics["train_loss"] for _, r in results if "train_loss" in r.metrics]
         avg_loss = sum(losses) / len(losses) if losses else 0.0
         self.loss_history.append(avg_loss)
@@ -288,13 +305,6 @@ class ProgressivePrivacyStrategy(FedAvg):
         val_loss = np.mean([r.metrics.get("val_loss", 0.0) for _, r in results])
         clip_norm = np.mean([r.metrics.get("clip_norm", 0.0) for _, r in results])
         avg_sensitivity = np.mean([r.metrics.get("avg_sensitivity", 0.0) for _, r in results])
-
-        # Privacy budget enforcement: halt training if budget exceeded
-        if dp_mode != "None" and current_epsilon > self.target_epsilon:
-            print(f"  STOPPING: Privacy budget exceeded! ε={current_epsilon:.2f} > target={self.target_epsilon:.2f}")
-            print(f"  Training halted to preserve differential privacy guarantees.")
-            self._save(new_global_params_ndarrays)
-            return agg_params, {"budget_exceeded": True}
 
         print(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
 
@@ -361,7 +371,7 @@ def server_fn(context: Context):
 
     model = make_model(dataset)
 
-    init_parameters_ndarrays = [v.detach().cpu().numpy() for v in model.state_dict().values()]
+    init_parameters_ndarrays = [v.detach().cpu().numpy() for _, v in model.named_parameters()]
     init_parameters = ndarrays_to_parameters(init_parameters_ndarrays)
 
     strategy = ProgressivePrivacyStrategy(

@@ -6,13 +6,15 @@ from qpriviot_fl.config import DEFAULT_CONFIG
 _thread_local = threading.local()
 
 
-def profile_device(config=DEFAULT_CONFIG):
+def profile_device(partition_id=None, config=DEFAULT_CONFIG):
     """
     Profiles device capability (0.0 - 1.0) and status.
     Returns device profile vector and readiness score.
     References: AdaPriv Section 3.2
     """
-    if not hasattr(_thread_local, 'client_id'):
+    if partition_id is not None:
+        random.seed(partition_id)
+    elif not hasattr(_thread_local, 'client_id'):
         _thread_local.client_id = (os.getpid() + threading.get_ident()) % 1000
 
     # Remove fixed seed to allow dynamic battery/network status across rounds
