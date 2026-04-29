@@ -244,7 +244,8 @@ def allocate_adaptive_noise(
     # Calibration: Instead of a conservative full-budget Gaussian mechanism,
     # we use a per-round scaling that relates target_epsilon to sigma.
     # In DP-SGD, sigma approx 1.0/epsilon is a standard heuristic for sub-privacy budgets.
-    base_sigma = 1.0 / max(target_epsilon, 1e-6)
+    # We apply formal Gaussian mechanism calibration using the target_delta.
+    base_sigma = math.sqrt(2 * math.log(1.25 / target_delta)) / max(target_epsilon, 1e-6)
 
     if not sensitivities:
         # Default if no sensitivity data yet - return empty dicts and base_sigma
@@ -373,13 +374,19 @@ def generate_zero_sum_masks(shapes: List[Tuple], num_clients: int, seed: int) ->
     """
     Generates 'num_clients' lists of masks using a seed. The sum of all masks is guaranteed to be ZERO.
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     masks_per_client = [[] for _ in range(num_clients)]
-    range_limit = 2_000_000
+    
+    # Bound the max range relative to num_clients to prevent int64 overflow
+    # For int64 max ~9e18. If num_clients is large, we reduce the range limit
+    # Max sum possible is num_clients * range_limit.
+    base_range = 2_000_000
+    safe_limit = int((9e18 / max(1, num_clients)) ** 0.5) # somewhat arbitrary conservative bound
+    range_limit = min(base_range, safe_limit)
 
     for shape in shapes:
 
-        random_masks = [np.random.randint(-range_limit, range_limit, size=shape, dtype=np.int64)
+        random_masks = [rng.integers(-range_limit, range_limit, size=shape, dtype=np.int64)
                         for _ in range(num_clients - 1)]
 
         sum_others = sum(random_masks)
