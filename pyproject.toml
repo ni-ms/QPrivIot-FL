@@ -26,6 +26,15 @@ dependencies = [
     "pyyaml"
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov",
+  "pytest-xdist",
+  "ruff",
+  "black",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 
