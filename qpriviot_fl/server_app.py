@@ -112,13 +112,17 @@ class ProgressivePrivacyStrategy(FedAvg):
             
             clients = [all_clients[cid] for cid in selected_cids]
         elif self.use_secagg:
+            num_available = client_manager.num_available()
+            num_to_sample = max(int(num_available * self.fraction_fit), self.min_fit_clients)
             clients = client_manager.sample(
-                num_clients=self.fraction_fit,
+                num_clients=num_to_sample,
                 min_num_clients=self.min_fit_clients
             )
         else:
+            num_available = client_manager.num_available()
+            num_to_sample = max(int(num_available * self.fraction_fit), self.min_fit_clients)
             clients = client_manager.sample(
-                num_clients=self.fraction_fit,
+                num_clients=num_to_sample,
                 min_num_clients=self.min_fit_clients
             )
 
