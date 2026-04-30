@@ -70,6 +70,9 @@ class QPrivIoTClient(NumPyClient):
             # Use dynamic learning rate from server if available, otherwise fall back to run_config
             learning_rate = float(config.get("learning_rate", self.run_config.get("learning-rate", 0.01)))
 
+            dirichlet_alpha = float(config.get("dirichlet_alpha", 0.3))
+            seed = int(config.get("seed", 42))
+
             convergence_score = float(config.get("convergence_score", 0.0))
             fine_tuning_active = False
             if convergence_score > 0.8:
@@ -77,7 +80,8 @@ class QPrivIoTClient(NumPyClient):
                 fine_tuning_active = True
                 print(f"CLIENT {self.partition_id}: High convergence ({convergence_score:.2f}) - adjusting LR and noise for fine-tuning.")
 
-            train_loader, _ = load_data(self.partition_id, self.num_partitions, 32, ds_name)
+            train_loader, _ = load_data(self.partition_id, self.num_partitions, 32, ds_name, 
+                                        alpha=dirichlet_alpha, seed=seed)
             device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
             model = make_model(ds_name).to(device)
 
@@ -253,7 +257,11 @@ class QPrivIoTClient(NumPyClient):
     def evaluate(self, parameters, config):
         try:
             ds_name = str(self.run_config.get("dataset", "cifar10"))
-            _, val_loader = load_data(self.partition_id, self.num_partitions, 32, ds_name)
+            dirichlet_alpha = float(config.get("dirichlet_alpha", 0.3))
+            seed = int(config.get("seed", 42))
+            
+            _, val_loader = load_data(self.partition_id, self.num_partitions, 32, ds_name,
+                                     alpha=dirichlet_alpha, seed=seed)
 
             device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
             model = make_model(ds_name).to(device)
