@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner
+from flwr_datasets.partitioner import IidPartitioner
 from torchvision.transforms import Compose, Normalize, ToTensor
 import numpy as np
 from datasets import load_dataset
@@ -70,29 +70,16 @@ def make_model(dataset_name: str):
 
 _fds_cache = {}
 
-def _seed_worker(worker_id):
-    import random as r
-    import numpy as n
-    worker_seed = torch.initial_seed() % 2**32
-    r.seed(worker_seed); n.random.seed(worker_seed)
-
-
-def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_name: str, alpha: float = 0.3, seed: int = 42):
+def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_name: str):
     """Load federated training data (partitioned) and global evaluation data (full test set)."""
 
     if dataset_name == "iot":
-        # Global seed for reproducibility
-        import random
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-
+        np.random.seed(partition_id)
         data = torch.randn(500, 10)
         targets = torch.randint(0, 2, (500,))
         train_ds = TensorDataset(data, targets)
         val_ds = TensorDataset(torch.randn(100, 10), torch.randint(0, 2, (100,)))
-        
-        return DataLoader(train_ds, batch_size=batch_size, shuffle=True, worker_init_fn=_seed_worker, generator=torch.Generator().manual_seed(seed)), \
+        return DataLoader(train_ds, batch_size=batch_size, shuffle=True), \
             DataLoader(val_ds, batch_size=batch_size)
 
     if dataset_name == "femnist":
@@ -100,17 +87,9 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
     else:
         hub_dataset_name = "uoft-cs/cifar10"
 
-    cache_key = (hub_dataset_name, num_partitions, alpha, seed)
+    cache_key = (hub_dataset_name, num_partitions)
     if cache_key not in _fds_cache:
-        if dataset_name == "iot":
-             partitioner = IidPartitioner(num_partitions=num_partitions)
-        else:
-             partitioner = DirichletPartitioner(
-                 num_partitions=num_partitions,
-                 alpha=alpha,
-                 partition_by="label",
-                 seed=seed
-             )
+        partitioner = IidPartitioner(num_partitions=num_partitions)
         fds = FederatedDataset(dataset=hub_dataset_name, partitioners={"train": partitioner})
         _fds_cache[cache_key] = fds
     else:
@@ -129,48 +108,14 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
 
     train_partition = fds.load_partition(partition_id, "train")
     train_partition = train_partition.with_transform(apply_transforms)
-    train_partition.set_format('torch')
-
-    train_loader = DataLoader(
-        train_partition,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=2,
-        pin_memory=True,
-        worker_init_fn=_seed_worker,
-        generator=torch.Generator().manual_seed(seed)
-    )
+    train_partition.set_format('torch')  # <--- PREVIOUS FIX: Set PyTorch format
+    train_loader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
 
     val_set = val_set.with_transform(apply_transforms)
-    val_set.set_format('torch')
+    val_set.set_format('torch')  # <--- PREVIOUS FIX: Set PyTorch format
     val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=2, pin_memory=True)
 
     return train_loader, val_loader
-
-
-def get_weights(model):
-    """Get model weights as a list of NumPy ndarrays, including buffers."""
-    return [val.cpu().numpy() for _, val in model.state_dict().items()]
-
-
-def set_weights(model, weights):
-    """Set model weights from a list of NumPy ndarrays, including buffers."""
-    state_dict = {
-        k: torch.as_tensor(v).to(dtype=p.dtype)
-        for (k, p), v in zip(model.state_dict().items(), weights)
-    }
-    model.load_state_dict(state_dict, strict=True)
-
-
-def weighted_avg_metrics(metrics):
-    """Aggregate metrics by weighted average."""
-    if not metrics:
-        return {}
-    total = sum(n for n, _ in metrics) or 1
-    out = {}
-    for key in {k for _, m in metrics for k in m if isinstance(m[k], (int, float))}:
-        out[key] = sum(n * m.get(key, 0.0) for n, m in metrics) / total
-    return out
 
 
 def train(model, loader, epochs, lr, device):
