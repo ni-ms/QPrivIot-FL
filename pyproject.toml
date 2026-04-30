@@ -26,13 +26,6 @@ dependencies = [
     "pyyaml"
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "opacus"
-]
-
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 
@@ -63,9 +56,6 @@ use-dp = false
 use-adaptive-dp = false
 target-epsilon = 12.0
 base-noise = 0.3
-seed = 1337
-dirichlet-alpha = 0.3
-results-file = "results.json"
 
 # Default federation to use when running the app
 [tool.flwr.federations]
@@ -74,8 +64,6 @@ default = "local-simulation"
 # Local simulation federation with 10 virtual SuperNodes
 [tool.flwr.federations.local-simulation]
 options.num-supernodes = 10
-options.backend.client-resources.num-cpus = 2
-options.backend.client-resources.num-gpus = 0.0
 
 # Remote federation example for use with SuperLink
 [tool.flwr.federations.remote-federation]
