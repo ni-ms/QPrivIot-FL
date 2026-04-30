@@ -10,7 +10,7 @@ import json
 
 from qpriviot_fl.config import DEFAULT_CONFIG as CONFIG
 from qpriviot_fl.device_profile import profile_device
-from qpriviot_fl.task import load_data, make_model, train, test
+from qpriviot_fl.task import load_data, make_model, train, test, get_weights, set_weights
 from qpriviot_fl.privacy_utils import (
     allocate_adaptive_noise,
     apply_dp_noise_per_layer,
@@ -20,6 +20,7 @@ from qpriviot_fl.privacy_utils import (
 
 DEVICE_MAP = {"raspberry_pi_4": 1, "raspberry_pi_zero": 2, "smartphone": 3, "iot_sensor": 4}
 
+_profile_cache = {}
 
 class QPrivIoTClient(NumPyClient):
     def __init__(self, context: Context):
@@ -30,7 +31,10 @@ class QPrivIoTClient(NumPyClient):
         self.partition_id = int(self.node_config.get("partition-id", 0))
         self.num_partitions = int(self.node_config.get("num-partitions", 1))
 
-        self.profile = profile_device(partition_id=self.partition_id, config=CONFIG)
+        if self.partition_id not in _profile_cache:
+            _profile_cache[self.partition_id] = profile_device(partition_id=self.partition_id, config=CONFIG)
+        self.profile = _profile_cache[self.partition_id]
+        
         self.res_score = float(self.profile.get("resource_score", 0.0))
         self.device_type = self.profile.get("device_type", "unknown")
 
@@ -176,6 +180,8 @@ class QPrivIoTClient(NumPyClient):
                 # the function returns the modified weights, but we can intercept it to get norms if necessary
                 # Instead, we will compute true observed norms just prior to calling apply_dp_noise
                 with torch.no_grad():
+                    # We ONLY apply DP to trainable parameters (named_parameters)
+                    # so we should only track norms for those.
                     for idx_param, (_, param) in enumerate(model.named_parameters()):
                         if idx_param < len(initial_weights_list):
                             delta = param.data - initial_weights_list[idx_param]
@@ -190,20 +196,16 @@ class QPrivIoTClient(NumPyClient):
 
             # Compute deltas using named_parameters (trainable only) for consistency
             # with apply_dp_noise_per_layer which also uses named_parameters
-            updated_params = [p.detach().cpu().numpy() for _, p in model.named_parameters()]
-            initial_weights_numpy = [p.cpu().numpy() for p in initial_weights_list]
+            updated_trainable_params = [p.detach().cpu().numpy() for _, p in model.named_parameters()]
+            initial_trainable_weights_numpy = [p.cpu().numpy() for p in initial_weights_list]
 
             updated_deltas = [
-                updated_params[i] - initial_weights_numpy[i]
-                for i in range(len(updated_params))
+                updated_trainable_params[i] - initial_trainable_weights_numpy[i]
+                for i in range(len(updated_trainable_params))
             ]
 
             if sensitivities_map:
                 avg_sensitivity = float(np.mean(list(sensitivities_map.values())))
-
-            # Evaluate on validation set BEFORE applying DP noise
-            eval_params = self._get_parameters(model)
-            val_loss, val_num_samples, eval_metrics_dict = self.evaluate(eval_params, config)
 
             metrics = {
                 "train_loss": train_loss,
@@ -214,8 +216,6 @@ class QPrivIoTClient(NumPyClient):
                 "secagg_active": use_secagg, 
                 "dp_mode": dp_mode,
                 "device_id": DEVICE_MAP.get(self.device_type, 0), 
-                "val_accuracy": float(eval_metrics_dict.get("accuracy", 0.0)),
-                "val_loss": float(val_loss), 
                 "avg_sensitivity": avg_sensitivity, 
                 "clip_norm_configured": avg_clip_norm_configured,
                 "clip_norm": actual_avg_clip_norm
@@ -268,13 +268,11 @@ class QPrivIoTClient(NumPyClient):
 
     def _set_parameters(self, model, parameters, device):
         """Sets model parameters from a list of NumPy arrays."""
-        for (_, param), new_val in zip(model.named_parameters(), parameters):
-            tensor = torch.from_numpy(new_val).to(device=device, dtype=param.dtype)
-            param.data = tensor.view(param.shape)
+        set_weights(model, parameters)
 
     def _get_parameters(self, model):
         """Returns model parameters as a list of NumPy arrays."""
-        return [val.detach().cpu().numpy() for _, val in model.named_parameters()]
+        return get_weights(model)
 
 
 def client_fn(context: Context):

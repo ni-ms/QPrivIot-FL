@@ -22,7 +22,7 @@ from flwr.server.strategy import FedAvg
 from flwr.server.client_proxy import ClientProxy
 
 from qpriviot_fl.privacy_utils import RenyiPrivacyAccountant, dequantize, SensitivityTracker, allocate_adaptive_noise
-from qpriviot_fl.task import make_model, load_data
+from qpriviot_fl.task import make_model, load_data, weighted_avg_metrics
 
 
 class ProgressivePrivacyStrategy(FedAvg):
@@ -53,7 +53,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.accountant = RenyiPrivacyAccountant(target_epsilon=target_epsilon, target_delta=1e-5)
         self.sensitivity_tracker = SensitivityTracker(alpha=0.5)
         self.experiments_log = []
-        self.secagg_seed = secrets.randbits(32)
+        self.secagg_seed = 42 # Default, will be overwritten in server_fn
         self._client_manager: ClientManager | None = None
         self.current_parameters: Parameters | None = None
         self.client_resources = {} # cid -> resource_score
@@ -86,6 +86,9 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.current_parameters = parameters
         self._client_manager = client_manager
 
+        num_to_sample = int(client_manager.num_available() * self.fraction_fit)
+        num_to_sample = max(num_to_sample, self.min_fit_clients)
+
         # Resource-aware sampling for AdaPriv: prioritize devices that have reported high scores
         if self.use_adaptive_dp and self.client_resources:
             all_clients = client_manager.all()
@@ -97,9 +100,6 @@ class ProgressivePrivacyStrategy(FedAvg):
                                reverse=True)
             
             # Sample top 70% high-resource for stability, 30% random for fairness/diversity
-            num_to_sample = int(client_manager.num_available() * self.fraction_fit)
-            num_to_sample = max(num_to_sample, self.min_fit_clients)
-            
             num_high = int(num_to_sample * 0.7)
             num_rand = num_to_sample - num_high
             
@@ -111,14 +111,9 @@ class ProgressivePrivacyStrategy(FedAvg):
                 selected_cids.extend(random.sample(remaining_cids, min(num_rand, len(remaining_cids))))
             
             clients = [all_clients[cid] for cid in selected_cids]
-        elif self.use_secagg:
-            clients = client_manager.sample(
-                num_clients=self.fraction_fit,
-                min_num_clients=self.min_fit_clients
-            )
         else:
             clients = client_manager.sample(
-                num_clients=self.fraction_fit,
+                num_clients=num_to_sample,
                 min_num_clients=self.min_fit_clients
             )
 
@@ -371,8 +366,11 @@ def server_fn(context: Context):
 
     model = make_model(dataset)
 
-    init_parameters_ndarrays = [v.detach().cpu().numpy() for _, v in model.named_parameters()]
+    from qpriviot_fl.task import get_weights
+    init_parameters_ndarrays = get_weights(model)
     init_parameters = ndarrays_to_parameters(init_parameters_ndarrays)
+
+    seed = context.run_config.get("seed", 42)
 
     strategy = ProgressivePrivacyStrategy(
         results_file=results_file_name,
@@ -389,7 +387,10 @@ def server_fn(context: Context):
         target_epsilon=context.run_config.get("target-epsilon", 3.0),
         num_rounds=num_rounds,
         initial_parameters=init_parameters,
+        fit_metrics_aggregation_fn=weighted_avg_metrics,
+        evaluate_metrics_aggregation_fn=weighted_avg_metrics,
     )
+    strategy.secagg_seed = int(seed)
 
     return ServerAppComponents(
         strategy=strategy,
