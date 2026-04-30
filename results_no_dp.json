@@ -1,0 +1,46 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "avg_loss": 0.683534089103341,
+      "val_accuracy": 0.0,
+      "val_loss": 0.0,
+      "convergence_score": 0.0,
+      "total_epsilon": 0.0,
+      "epsilon_t": 4.242640687119285,
+      "sensitivities": {
+        "fc1.weight": 0.850177682638402,
+        "fc1.bias": 0.6523212888297258,
+        "fc2.weight": 1.5452859863026775,
+        "fc2.bias": 0.9522150422291946
+      },
+      "avg_latency": 0.28444822551368454,
+      "avg_resource": 0.2541060763184205,
+      "clip_norm": 5.0,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "None"
+    },
+    {
+      "round": 2,
+      "avg_loss": 0.6816079971380532,
+      "val_accuracy": 0.0,
+      "val_loss": 0.0,
+      "convergence_score": 0.0,
+      "total_epsilon": 0.0,
+      "epsilon_t": 4.242640687119285,
+      "sensitivities": {
+        "fc1.weight": 0.6713391557094588,
+        "fc1.bias": 0.7497257915888258,
+        "fc2.weight": 1.6237967178759098,
+        "fc2.bias": 0.9551383348258053
+      },
+      "avg_latency": 0.30309048788935344,
+      "avg_resource": 0.24426909929206186,
+      "clip_norm": 5.0,
+      "avg_sensitivity": 0.0,
+      "secagg_active": false,
+      "dp_mode": "None"
+    }
+  ]
+}
