@@ -26,6 +26,13 @@ dependencies = [
     "pyyaml"
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "opacus"
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 
@@ -56,6 +63,9 @@ use-dp = false
 use-adaptive-dp = false
 target-epsilon = 12.0
 base-noise = 0.3
+seed = 1337
+dirichlet-alpha = 0.3
+results-file = "results.json"
 
 # Default federation to use when running the app
 [tool.flwr.federations]
