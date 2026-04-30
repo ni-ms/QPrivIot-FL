@@ -175,7 +175,7 @@ results_*.json
 experiment_results/
 logs/
 test_artifacts/
-# figures/
+figures/
 *.npz
 *.pt
 *.pth
@@ -210,14 +210,3 @@ venv/
 env/
 .env
 .env.*
-
-# LaTeX build artifacts
-paper/*.aux
-paper/*.bbl
-paper/*.blg
-paper/*.log
-paper/*.out
-paper/*.synctex.gz
-paper/*.fdb_latexmk
-paper/*.fls
-paper/*.spl
