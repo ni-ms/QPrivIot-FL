@@ -37,6 +37,25 @@ class QPrivIoTClient(NumPyClient):
         
         self.res_score = float(self.profile.get("resource_score", 0.0))
         self.device_type = self.profile.get("device_type", "unknown")
+        self._loaders_cache = {}
+
+    def _get_loaders(self):
+        ds_name = str(self.run_config.get("dataset", "cifar10"))
+        batch_size = int(self.run_config.get("batch-size", 32))
+        alpha = float(self.run_config.get("dirichlet-alpha", 0.3))
+        seed = int(self.run_config.get("seed", 42))
+        
+        cache_key = (ds_name, batch_size, alpha, seed)
+        if cache_key not in self._loaders_cache:
+            self._loaders_cache[cache_key] = load_data(
+                self.partition_id, 
+                self.num_partitions, 
+                batch_size, 
+                ds_name,
+                alpha=alpha,
+                seed=seed
+            )
+        return self._loaders_cache[cache_key]
 
     def fit(self, parameters, config):
         """Train parameters on the locally held dataset."""
@@ -81,7 +100,7 @@ class QPrivIoTClient(NumPyClient):
                 fine_tuning_active = True
                 print(f"CLIENT {self.partition_id}: High convergence ({convergence_score:.2f}) - adjusting LR and noise for fine-tuning.")
 
-            train_loader, _ = load_data(self.partition_id, self.num_partitions, 32, ds_name)
+            train_loader, _ = self._get_loaders()
             device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
             model = make_model(ds_name).to(device)
 
@@ -252,10 +271,10 @@ class QPrivIoTClient(NumPyClient):
 
     def evaluate(self, parameters, config):
         try:
-            ds_name = str(self.run_config.get("dataset", "cifar10"))
-            _, val_loader = load_data(self.partition_id, self.num_partitions, 32, ds_name)
+            _, val_loader = self._get_loaders()
 
             device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+            ds_name = str(self.run_config.get("dataset", "cifar10"))
             model = make_model(ds_name).to(device)
             self._set_parameters(model, parameters, device)
 
@@ -268,7 +287,11 @@ class QPrivIoTClient(NumPyClient):
 
     def _set_parameters(self, model, parameters, device):
         """Sets model parameters from a list of NumPy arrays."""
-        set_weights(model, parameters)
+        state_dict = {
+            k: torch.as_tensor(v).to(device=device, dtype=p.dtype)
+            for (k, p), v in zip(model.state_dict().items(), parameters)
+        }
+        model.load_state_dict(state_dict, strict=True)
 
     def _get_parameters(self, model):
         """Returns model parameters as a list of NumPy arrays."""

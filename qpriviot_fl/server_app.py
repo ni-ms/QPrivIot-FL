@@ -22,7 +22,22 @@ from flwr.server.strategy import FedAvg
 from flwr.server.client_proxy import ClientProxy
 
 from qpriviot_fl.privacy_utils import RenyiPrivacyAccountant, dequantize, SensitivityTracker, allocate_adaptive_noise
-from qpriviot_fl.task import make_model, load_data, weighted_avg_metrics
+from qpriviot_fl.task import make_model, load_data, weighted_avg_metrics, get_weights, set_weights, test
+
+
+def make_evaluate_fn(dataset: str, batch_size: int = 64, alpha: float = 0.3, seed: int = 42):
+    device = torch.device("cuda" if torch.cuda.is_available()
+                          else "mps" if torch.backends.mps.is_available()
+                          else "cpu")
+    model = make_model(dataset).to(device)
+    _, val_loader = load_data(0, 1, batch_size, dataset, alpha=alpha, seed=seed)  # global test set
+
+    def evaluate_fn(server_round, parameters, _config):
+        set_weights(model, parameters_to_ndarrays(parameters))
+        loss, acc = test(model, val_loader, device)
+        return float(loss), {"accuracy": float(acc), "val_loss": float(loss),
+                             "val_accuracy": float(acc)}
+    return evaluate_fn
 
 
 class ProgressivePrivacyStrategy(FedAvg):
@@ -38,8 +53,8 @@ class ProgressivePrivacyStrategy(FedAvg):
                  dataset="cifar10",
                  **kwargs):
         super().__init__(**kwargs)
-        self.results_file = os.path.abspath(results_file)
-        self.model_file = os.path.abspath(model_file)
+        self.results_file = results_file
+        self.model_file = model_file
         self.use_secagg = use_secagg
         self.use_dp = use_dp
         self.use_adaptive_dp = use_adaptive_dp
@@ -57,6 +72,14 @@ class ProgressivePrivacyStrategy(FedAvg):
         self._client_manager: ClientManager | None = None
         self.current_parameters: Parameters | None = None
         self.client_resources = {} # cid -> resource_score
+        self._last_central_eval = {}
+
+    def evaluate(self, server_round, parameters):
+        out = super().evaluate(server_round, parameters)
+        if out is not None:
+            loss, metrics = out
+            self._last_central_eval = {"val_loss": loss, **metrics}
+        return out
 
     def _get_round_epsilon(self, server_round: int) -> float:
         """
@@ -296,8 +319,8 @@ class ProgressivePrivacyStrategy(FedAvg):
         avg_loss = sum(losses) / len(losses) if losses else 0.0
         self.loss_history.append(avg_loss)
 
-        val_accuracy = np.mean([r.metrics.get("val_accuracy", 0.0) for _, r in results])
-        val_loss = np.mean([r.metrics.get("val_loss", 0.0) for _, r in results])
+        val_accuracy = self._last_central_eval.get("val_accuracy", 0.0)
+        val_loss = self._last_central_eval.get("val_loss", 0.0)
         clip_norm = np.mean([r.metrics.get("clip_norm", 0.0) for _, r in results])
         avg_sensitivity = np.mean([r.metrics.get("avg_sensitivity", 0.0) for _, r in results])
 
@@ -340,9 +363,15 @@ class ProgressivePrivacyStrategy(FedAvg):
 
 def server_fn(context: Context):
     """Server function - returns ServerAppComponents."""
+    seed = int(context.run_config.get("seed", 42))
+    import random, numpy as np, torch
+    random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
     num_rounds = context.run_config.get("num-server-rounds", 10)
     dataset = context.run_config.get("dataset", "cifar10")
+    alpha = float(context.run_config.get("dirichlet-alpha", 0.3))
 
     use_secagg = context.run_config.get("use-secagg", False)
     use_dp = context.run_config.get("use-dp", False)
@@ -360,21 +389,22 @@ def server_fn(context: Context):
     if use_secagg:
         filename_parts.append("secagg")
 
-    results_file_name = "_".join(filename_parts) + ".json"
+    results_file_name = context.run_config.get("results-file")
+    if results_file_name:
+        results_file_path = results_file_name
+    else:
+        results_file_path = "_".join(filename_parts) + ".json"
 
     model_file_name = context.run_config.get("model-output-file", "global_model.npz")
+    model_file_path = model_file_name
 
     model = make_model(dataset)
-
-    from qpriviot_fl.task import get_weights
     init_parameters_ndarrays = get_weights(model)
     init_parameters = ndarrays_to_parameters(init_parameters_ndarrays)
 
-    seed = context.run_config.get("seed", 42)
-
     strategy = ProgressivePrivacyStrategy(
-        results_file=results_file_name,
-        model_file=model_file_name,
+        results_file=results_file_path,
+        model_file=model_file_path,
         use_secagg=use_secagg,
         use_dp=use_dp,
         use_adaptive_dp=use_adaptive_dp,
@@ -387,10 +417,11 @@ def server_fn(context: Context):
         target_epsilon=context.run_config.get("target-epsilon", 3.0),
         num_rounds=num_rounds,
         initial_parameters=init_parameters,
+        evaluate_fn=make_evaluate_fn(dataset, alpha=alpha, seed=seed),
         fit_metrics_aggregation_fn=weighted_avg_metrics,
         evaluate_metrics_aggregation_fn=weighted_avg_metrics,
     )
-    strategy.secagg_seed = int(seed)
+    strategy.secagg_seed = seed
 
     return ServerAppComponents(
         strategy=strategy,
