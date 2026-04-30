@@ -1,7 +1,8 @@
-import numpy as np
+import numpy as np, pytest
 from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import DirichletPartitioner, IidPartitioner
 
+@pytest.mark.slow
 def test_dirichlet_creates_imbalance():
     p = DirichletPartitioner(num_partitions=10, partition_by="label", alpha=0.3, seed=1)
     fds = FederatedDataset(dataset="uoft-cs/cifar10", partitioners={"train": p})
