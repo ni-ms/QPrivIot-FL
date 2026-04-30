@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import IidPartitioner
+from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner
 from torchvision.transforms import Compose, Normalize, ToTensor
 import numpy as np
 from datasets import load_dataset
@@ -70,11 +70,12 @@ def make_model(dataset_name: str):
 
 _fds_cache = {}
 
-def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_name: str):
+def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_name: str,
+              alpha: float = 0.3, seed: int = 42):
     """Load federated training data (partitioned) and global evaluation data (full test set)."""
 
     if dataset_name == "iot":
-        np.random.seed(partition_id)
+        np.random.seed(seed + partition_id)
         data = torch.randn(500, 10)
         targets = torch.randint(0, 2, (500,))
         train_ds = TensorDataset(data, targets)
@@ -87,9 +88,18 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
     else:
         hub_dataset_name = "uoft-cs/cifar10"
 
-    cache_key = (hub_dataset_name, num_partitions)
+    cache_key = (hub_dataset_name, num_partitions, alpha, seed)
     if cache_key not in _fds_cache:
-        partitioner = IidPartitioner(num_partitions=num_partitions)
+        if alpha > 100:  # Use IID if alpha is very high
+            partitioner = IidPartitioner(num_partitions=num_partitions)
+        else:
+            partitioner = DirichletPartitioner(
+                num_partitions=num_partitions,
+                partition_by="label",
+                alpha=alpha,
+                seed=seed,
+                min_partition_size=10
+            )
         fds = FederatedDataset(dataset=hub_dataset_name, partitioners={"train": partitioner})
         _fds_cache[cache_key] = fds
     else:

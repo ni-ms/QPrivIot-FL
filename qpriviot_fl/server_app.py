@@ -6,7 +6,8 @@ import math
 import random
 import secrets
 import torch
-from typing import List, Optional
+import pandas as pd
+from typing import List, Optional, Dict, Any
 
 import numpy as np
 from flwr.common import (
@@ -36,6 +37,9 @@ class ProgressivePrivacyStrategy(FedAvg):
                  num_rounds=100,
                  learning_rate=0.01,
                  dataset="cifar10",
+                 seed=42,
+                 alpha=0.3,
+                 num_clients=10,
                  **kwargs):
         super().__init__(**kwargs)
         self.results_file = os.path.abspath(results_file)
@@ -47,12 +51,16 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.num_rounds = num_rounds
         self.learning_rate = learning_rate
         self.dataset = dataset
+        self.seed = seed
+        self.alpha = alpha
+        self.num_clients = num_clients
         
         self.loss_history = []
         self.convergence_score = 0.0
         self.accountant = RenyiPrivacyAccountant(target_epsilon=target_epsilon, target_delta=1e-5)
         self.sensitivity_tracker = SensitivityTracker(alpha=0.5)
         self.experiments_log = []
+        self.per_client_log = []
         self.secagg_seed = secrets.randbits(32)
         self._client_manager: ClientManager | None = None
         self.current_parameters: Parameters | None = None
@@ -167,6 +175,9 @@ class ProgressivePrivacyStrategy(FedAvg):
                 "round": server_round,
                 "epsilon_t": epsilon_t,
                 "learning_rate": current_lr,
+                "dirichlet_alpha": self.alpha,
+                "seed": self.seed,
+                "num_clients": self.num_clients,
                 "sensitivities": json.dumps(clamped_sensitivities)
             }
 
@@ -316,6 +327,17 @@ class ProgressivePrivacyStrategy(FedAvg):
         epsilon_t_current = self._get_round_epsilon(server_round) if hasattr(self, '_get_round_epsilon') else 0.0
         current_sensitivities = self.sensitivity_tracker.get_sensitivities() if hasattr(self, 'sensitivity_tracker') else {}
 
+        # Log per-client results
+        for proxy, res in results:
+            self.per_client_log.append({
+                "round": server_round,
+                "client_id": proxy.cid,
+                "val_accuracy": res.metrics.get("val_accuracy", 0.0),
+                "val_loss": res.metrics.get("val_loss", 0.0),
+                "train_loss": res.metrics.get("train_loss", 0.0),
+                "num_examples": res.num_examples,
+            })
+
         record = {
             "round": server_round,
             "avg_loss": avg_loss,
@@ -342,6 +364,11 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         with open(self.results_file, "w") as f:
             json.dump({"rounds": self.experiments_log}, f, indent=2)
+
+        if self.per_client_log:
+            pd.DataFrame(self.per_client_log).to_csv(
+                self.results_file.replace(".json", "_per_client.csv"), index=False
+            )
 
         print(f"  Saving global model to {self.model_file}...")
         np.savez(self.model_file, *aggregated_model_ndarrays)
@@ -385,6 +412,9 @@ def server_fn(context: Context):
         use_dp=use_dp,
         use_adaptive_dp=use_adaptive_dp,
         dataset=dataset,
+        seed=context.run_config.get("seed", 42),
+        alpha=context.run_config.get("dirichlet-alpha", 0.3),
+        num_clients=context.run_config.get("num-clients", 10),
         fraction_fit=context.run_config.get("fraction-fit", 1.0),
         fraction_evaluate=context.run_config.get("fraction-evaluate", 1.0),
         min_fit_clients=context.run_config.get("min-fit-clients", 1),
