@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import IidPartitioner
+from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner
 from torchvision.transforms import Compose, Normalize, ToTensor
 import numpy as np
 from datasets import load_dataset
@@ -89,7 +89,11 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
 
     cache_key = (hub_dataset_name, num_partitions)
     if cache_key not in _fds_cache:
-        partitioner = IidPartitioner(num_partitions=num_partitions)
+        if dataset_name == "iot":
+             # IoT is handled separately above, but if it reached here
+             partitioner = IidPartitioner(num_partitions=num_partitions)
+        else:
+             partitioner = DirichletPartitioner(num_partitions=num_partitions, alpha=0.3, partition_by="label", self_labels_exist=True)
         fds = FederatedDataset(dataset=hub_dataset_name, partitioners={"train": partitioner})
         _fds_cache[cache_key] = fds
     else:
@@ -116,6 +120,29 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
     val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=2, pin_memory=True)
 
     return train_loader, val_loader
+
+
+def get_weights(model):
+    """Get model weights as a list of NumPy ndarrays, including buffers."""
+    return [val.cpu().numpy() for _, val in model.state_dict().items()]
+
+
+def set_weights(model, weights):
+    """Set model weights from a list of NumPy ndarrays, including buffers."""
+    state_dict = {
+        k: torch.tensor(v) for k, v in zip(model.state_dict().keys(), weights)
+    }
+    model.load_state_dict(state_dict, strict=True)
+
+
+def weighted_avg_metrics(metrics):
+    """Aggregate metrics by weighted average."""
+    # Multiply accuracy of each client by number of examples used
+    accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics]
+    examples = [num_examples for num_examples, _ in metrics]
+
+    # Aggregate and return custom metric (weighted average)
+    return {"accuracy": sum(accuracies) / sum(examples)}
 
 
 def train(model, loader, epochs, lr, device):
