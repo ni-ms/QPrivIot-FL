@@ -97,9 +97,9 @@ class QPrivIoTClient(NumPyClient):
 
             base_clip_norm_res = float(getattr(CONFIG.privacy, "initial_clip_norm", 0.05)) * max(self.res_score, 0.01)
 
+            epsilon_t = float(config.get("epsilon_t", 1.0))
             if use_adaptive_dp:
                 # Extract AdaPriv parameters from config
-                epsilon_t = float(config.get("epsilon_t", 1.0))
                 sensitivities_str = config.get("sensitivities", "{}")
                 try:
                     sensitivities_map = json.loads(sensitivities_str)
@@ -141,10 +141,13 @@ class QPrivIoTClient(NumPyClient):
                 print(f"CLIENT {self.partition_id}: AdaPriv (ε_t={epsilon_t:.3f}, R_i={self.res_score:.2f})")
 
             elif use_dp:
-                # Fixed DP: Calibrate noise to the per-round epsilon for a fair comparison
-                epsilon_t = float(config.get("epsilon_t", 1.0))
-                # base_sigma approx calculated using formal Gaussian mechanism
-                fixed_noise_multiplier = math.sqrt(2 * math.log(1.25 / 1e-5)) / max(epsilon_t, 1e-6)
+                # Fixed DP: Use the pre-calibrated sigma from server if available
+                sigma = float(config.get("sigma", 0.0))
+                if sigma == 0:
+                    epsilon_t = float(config.get("epsilon_t", 1.0))
+                    sigma = math.sqrt(2 * math.log(1.25 / 1e-5)) / max(epsilon_t, 1e-6)
+                
+                fixed_noise_multiplier = sigma
                 fixed_clip_norm = 1.0
                 
                 param_keys = [n for n, _ in model.named_parameters()]
@@ -155,7 +158,7 @@ class QPrivIoTClient(NumPyClient):
                 clip_norms_map = {name: fixed_clip_norm for name in param_keys}
                 dp_was_applied = True
                 dp_mode = "Fixed"
-                print(f"CLIENT {self.partition_id}: Fixed DP (ε_t={epsilon_t:.3f}, Noise={fixed_noise_multiplier:.3f}, Clip={fixed_clip_norm:.2f})")
+                print(f"CLIENT {self.partition_id}: Fixed DP (Noise={fixed_noise_multiplier:.3f}, Clip={fixed_clip_norm:.2f})")
 
             else:
                 dp_mode = "None"
@@ -171,8 +174,15 @@ class QPrivIoTClient(NumPyClient):
             # Record performance metrics for telemetry
             avg_clip_norm_configured = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
 
+            # Evaluate on validation set BEFORE applying DP noise
+            eval_params = self._get_parameters(model)
+            val_loss, val_num_samples, eval_metrics_dict = self.evaluate(eval_params, config)
+
+            mu = float(config.get("proximal_mu", 0.0))
+
             # Training
-            train_loss = float(train(model, train_loader, epochs=local_epochs, lr=learning_rate, device=device))
+            train_loss = float(train(model, train_loader, epochs=local_epochs, lr=learning_rate, device=device,
+                                     global_state=initial_weights_list, mu=mu))
 
             observed_gradient_norms = []
             if dp_was_applied:
@@ -204,10 +214,6 @@ class QPrivIoTClient(NumPyClient):
 
             if sensitivities_map:
                 avg_sensitivity = float(np.mean(list(sensitivities_map.values())))
-
-            # Evaluate on validation set BEFORE applying DP noise
-            eval_params = self._get_parameters(model)
-            val_loss, val_num_samples, eval_metrics_dict = self.evaluate(eval_params, config)
 
             metrics = {
                 "train_loss": train_loss,
