@@ -87,7 +87,7 @@ def load_experiments(results_dir='./experiment_results'):
         filename = Path(filepath).name
         
         # Parse filename: results_{dataset}_{config}_seed{seed}_eps{epsilon}.json
-        match = re.match(r'results_(\w+)_(\w+-?\w*)_seed(\d+)_eps([\d.]+)\.json', filename)
+        match = re.match(r'results_(\w+)_([a-zA-Z0-9_-]+)_seed(\d+)_eps([\d.]+)\.json', filename)
         
         if not match:
             print(f"⚠️  Skipping {filename} (doesn't match pattern)")
@@ -114,6 +114,7 @@ def load_experiments(results_dir='./experiment_results'):
 def aggregate_seeds(experiments_list):
     """
     Aggregate results across multiple seeds.
+    Fix: index by round number, not list position, to handle early stopping.
     
     Returns:
         Dictionary with mean and std for each metric
@@ -121,18 +122,21 @@ def aggregate_seeds(experiments_list):
     if not experiments_list:
         return None
     
-    # Get all rounds (assume same length across seeds)
-    num_rounds = len(experiments_list[0]['data']['rounds'])
-    
     # Collect metrics across seeds
     metrics_by_round = defaultdict(lambda: defaultdict(list))
     
     for exp in experiments_list:
         rounds = exp['data']['rounds']
-        for i, round_data in enumerate(rounds):
+        for round_data in rounds:
+            rnd = round_data.get('round')
+            if rnd is None:
+                continue
             for metric, value in round_data.items():
-                if isinstance(value, (int, float)):  # Only numeric metrics
-                    metrics_by_round[i][metric].append(value)
+                if isinstance(value, (int, float)) and metric != 'round':  # Only numeric metrics
+                    metrics_by_round[rnd][metric].append(value)
+    
+    # Sort rounds
+    sorted_rounds = sorted(metrics_by_round.keys())
     
     # Compute mean and std
     aggregated = {
@@ -140,11 +144,12 @@ def aggregate_seeds(experiments_list):
         'num_seeds': len(experiments_list)
     }
     
-    for i in range(num_rounds):
-        round_agg = {'round': i + 1}
-        for metric, values in metrics_by_round[i].items():
-            round_agg[f'{metric}_mean'] = np.mean(values)
-            round_agg[f'{metric}_std'] = np.std(values)
+    for rnd in sorted_rounds:
+        round_agg = {'round': rnd}
+        for metric, values in metrics_by_round[rnd].items():
+            if values:
+                round_agg[f'{metric}_mean'] = np.mean(values)
+                round_agg[f'{metric}_std'] = np.std(values)
         aggregated['rounds'].append(round_agg)
     
     return aggregated

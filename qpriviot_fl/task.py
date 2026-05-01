@@ -128,7 +128,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
     return train_loader, val_loader
 
 
-def train(model, loader, epochs, lr, device):
+def train(model, loader, epochs, lr, device, global_state=None, mu=0.0):
     """Train the model for a specified number of epochs."""
     model.train()
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
@@ -150,6 +150,12 @@ def train(model, loader, epochs, lr, device):
 
             optimizer.zero_grad()
             loss = criterion(model(x), y)
+            
+            if mu > 0 and global_state is not None:
+                prox = sum(((p - g.to(device))**2).sum()
+                           for p, g in zip(model.parameters(), global_state))
+                loss = loss + (mu / 2.0) * prox
+            
             loss.backward()
             
             # Standard gradient clipping for stability

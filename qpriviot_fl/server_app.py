@@ -7,7 +7,9 @@ import random
 import secrets
 import torch
 import pandas as pd
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
+
+from opacus.accountants.utils import get_noise_multiplier
 
 import numpy as np
 from flwr.common import (
@@ -15,7 +17,9 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
     FitIns,
-    Parameters
+    Parameters,
+    Metrics,
+    Scalar
 )
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
 from flwr.server.client_manager import ClientManager
@@ -23,7 +27,21 @@ from flwr.server.strategy import FedAvg
 from flwr.server.client_proxy import ClientProxy
 
 from qpriviot_fl.privacy_utils import RenyiPrivacyAccountant, dequantize, SensitivityTracker, allocate_adaptive_noise
-from qpriviot_fl.task import make_model, load_data
+from qpriviot_fl.task import make_model, load_data, test
+
+
+def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
+    """Aggregates metrics by weighting them by the number of examples."""
+    total_examples = sum(num_examples for num_examples, _ in metrics)
+    accuracies = [num_examples * m["val_accuracy"] for num_examples, m in metrics if "val_accuracy" in m]
+    losses = [num_examples * m["val_loss"] for num_examples, m in metrics if "val_loss" in m]
+
+    result: Metrics = {}
+    if accuracies and total_examples > 0:
+        result["val_accuracy"] = sum(accuracies) / total_examples
+    if losses and total_examples > 0:
+        result["val_loss"] = sum(losses) / total_examples
+    return result
 
 
 class ProgressivePrivacyStrategy(FedAvg):
@@ -54,10 +72,33 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.seed = seed
         self.alpha = alpha
         self.num_clients = num_clients
-        
+
+        self.target_delta = 1e-5
+
+        # Early stopping state
+        self._best_val_loss = float('inf')
+        self._patience = 0
+        self._early_stop = False
+
         self.loss_history = []
         self.convergence_score = 0.0
-        self.accountant = RenyiPrivacyAccountant(target_epsilon=target_epsilon, target_delta=1e-5)
+
+        # Section 4.1: Calibrate noise multiplier using Opacus
+        if use_dp or use_adaptive_dp:
+            # Opacus expects 'epochs' to be the total number of training steps.
+            # In FL, T rounds with 1 local epoch per round = T total epochs on the dataset
+            # (assuming we sample fraction_fit clients each round).
+            self.sigma = get_noise_multiplier(
+                target_epsilon=target_epsilon,
+                target_delta=self.target_delta,
+                sample_rate=self.fraction_fit,
+                epochs=self.num_rounds
+            )
+            print(f"  [DP CALIBRATION] Target ε={target_epsilon}, T={num_rounds}, q={self.fraction_fit} => σ={self.sigma:.4f}")
+        else:
+            self.sigma = 0.0
+
+        self.accountant = RenyiPrivacyAccountant(target_epsilon=target_epsilon, target_delta=self.target_delta)
         self.sensitivity_tracker = SensitivityTracker(alpha=0.5)
         self.experiments_log = []
         self.per_client_log = []
@@ -65,34 +106,36 @@ class ProgressivePrivacyStrategy(FedAvg):
         self._client_manager: ClientManager | None = None
         self.current_parameters: Parameters | None = None
         self.client_resources = {} # cid -> resource_score
+        
+        # Load test data for centralized evaluation
+        _, self.test_loader = load_data(0, 1, 32, dataset, alpha=100.0, seed=seed)
 
     def _get_round_epsilon(self, server_round: int) -> float:
         """
-        Calculates per-round epsilon using cosine annealing.
-        References: Section 3.4
+        Calculates per-round epsilon using the pre-calibrated sigma.
         """
-        num_rounds = max(self.num_rounds, 1)
-        # Calibration: To last 'num_rounds', each round should cost approx target_epsilon / num_rounds
-        # The 2.0 multiplier is a calibration constant for Renyi Differential Privacy (RDP).
-        # RDP composition theorems involve constants that can cause the privacy budget 
-        # to be exhausted faster than a simple linear sqrt(T) division would suggest.
-        # This buffer ensures the model reaches all T rounds for maximum utility.
-        base_eps = self.target_epsilon / (math.sqrt(num_rounds) * 2.0)
+        base_eps = self.target_epsilon / self.num_rounds
         
         if not self.use_adaptive_dp:
             return base_eps
 
+        # For AdaPriv, we still allow some annealing of the *relative* budget
         epsilon_init = base_eps * 1.5
         epsilon_final = base_eps * 0.5
         
-        # decay(t, T) = (1 + cos(pi * t / T)) / 2
-        decay = (1 + math.cos(math.pi * (server_round - 1) / num_rounds)) / 2
+        decay = (1 + math.cos(math.pi * (server_round - 1) / self.num_rounds)) / 2
         epsilon_t = epsilon_final + (epsilon_init - epsilon_final) * decay
         return epsilon_t
 
     def configure_fit(self, server_round, parameters, client_manager: ClientManager):
         self.current_parameters = parameters
         self._client_manager = client_manager
+
+        # Privacy budget enforcement: halt training if budget exceeded
+        current_epsilon = self.accountant.get_total_epsilon()
+        if (self.use_dp or self.use_adaptive_dp) and current_epsilon >= self.target_epsilon:
+            print(f"  STOPPING: Privacy budget exhausted! ε={current_epsilon:.2f} >= target={self.target_epsilon:.2f}")
+            return []
 
         # Resource-aware sampling for AdaPriv: prioritize devices that have reported high scores
         if self.use_adaptive_dp and self.client_resources:
@@ -155,8 +198,14 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         # Baseline learning rate passed during init
         base_lr = self.learning_rate
-        # Apply 50% decay after reaching 25% of total rounds
-        current_lr = base_lr * 0.5 if server_round > max(1, self.num_rounds * 0.25) else base_lr
+        
+        # Section 4.4: Cosine learning rate schedule with warmup
+        warmup_rounds = 5
+        if server_round <= warmup_rounds:
+            current_lr = base_lr * server_round / warmup_rounds
+        else:
+            progress = (server_round - warmup_rounds) / max(1, self.num_rounds - warmup_rounds)
+            current_lr = base_lr * 0.5 * (1 + math.cos(math.pi * progress))
 
         new_instructions = []
         total_clients = len(clients)
@@ -174,7 +223,9 @@ class ProgressivePrivacyStrategy(FedAvg):
                 "convergence_score": self.convergence_score,
                 "round": server_round,
                 "epsilon_t": epsilon_t,
+                "sigma": self.sigma,
                 "learning_rate": current_lr,
+                "proximal_mu": 0.01 if not self.use_dp and not self.use_adaptive_dp else 0.0, # FedProx for No-DP
                 "dirichlet_alpha": self.alpha,
                 "seed": self.seed,
                 "num_clients": self.num_clients,
@@ -190,6 +241,24 @@ class ProgressivePrivacyStrategy(FedAvg):
             new_instructions.append((client_proxy, fit_ins))
 
         return new_instructions
+
+    def evaluate(self, server_round: int, parameters: Parameters) -> Optional[Tuple[float, Dict[str, Scalar]]]:
+        """Centralized evaluation on the server."""
+        if self.test_loader is None:
+            return None
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        model = make_model(self.dataset).to(device)
+        
+        # Set model parameters
+        params_ndarray = parameters_to_ndarrays(parameters)
+        for (_, param), new_val in zip(model.named_parameters(), params_ndarray):
+            tensor = torch.from_numpy(new_val).to(device=device, dtype=param.dtype)
+            param.data = tensor.view(param.shape)
+            
+        loss, accuracy = test(model, self.test_loader, device)
+        print(f"  [CENTRALIZED EVAL] Round {server_round}: loss={loss:.4f}, accuracy={accuracy:.4f}")
+        return loss, {"accuracy": accuracy}
 
     def aggregate_fit(self, server_round, results, failures):
         """
@@ -279,13 +348,16 @@ class ProgressivePrivacyStrategy(FedAvg):
         dp_mode = results[0][1].metrics.get("dp_mode", "None")
         
         if dp_mode != "None" and accounting_noise > 0:
-            self.accountant.add_round(noise_multiplier=accounting_noise, sampling_rate=sampling_rate)
+            # Opacus uses steps=1 because we pass sample_rate and epochs to get_noise_multiplier
+            # which already accounts for multiple steps/epochs if calibrated that way.
+            # In Flower, each round is essentially one step in the global accountant's view.
+            self.accountant.add_round(noise_multiplier=accounting_noise, sampling_rate=sampling_rate, steps=1)
 
         current_epsilon = self.accountant.get_total_epsilon()
 
         # Privacy budget enforcement: halt training if budget exceeded
-        if dp_mode != "None" and current_epsilon > self.target_epsilon:
-            print(f"  STOPPING: Privacy budget exceeded! ε={current_epsilon:.2f} > target={self.target_epsilon:.2f}")
+        if dp_mode != "None" and current_epsilon >= self.target_epsilon:
+            print(f"  STOPPING: Privacy budget exhausted! ε={current_epsilon:.2f} >= target={self.target_epsilon:.2f}")
             print(f"  Training halted to preserve differential privacy guarantees.")
             return None, {"budget_exceeded": True}
 
@@ -316,10 +388,27 @@ class ProgressivePrivacyStrategy(FedAvg):
         avg_loss = sum(losses) / len(losses) if losses else 0.0
         self.loss_history.append(avg_loss)
 
-        val_accuracy = np.mean([r.metrics.get("val_accuracy", 0.0) for _, r in results])
-        val_loss = np.mean([r.metrics.get("val_loss", 0.0) for _, r in results])
+        # Weighted aggregation of metrics for logging
+        total_n = sum(res.num_examples for _, res in results)
+        if total_n > 0:
+            val_accuracy = sum(res.metrics.get("val_accuracy", 0.0) * res.num_examples for _, res in results) / total_n
+            val_loss = sum(res.metrics.get("val_loss", 0.0) * res.num_examples for _, res in results) / total_n
+        else:
+            val_accuracy = np.mean([r.metrics.get("val_accuracy", 0.0) for _, r in results])
+            val_loss = np.mean([r.metrics.get("val_loss", 0.0) for _, r in results])
+
         clip_norm = np.mean([r.metrics.get("clip_norm", 0.0) for _, r in results])
         avg_sensitivity = np.mean([r.metrics.get("avg_sensitivity", 0.0) for _, r in results])
+
+        # Section 4.4: Early stopping on val_loss
+        if val_loss < self._best_val_loss - 1e-3:
+            self._best_val_loss = val_loss
+            self._patience = 0
+        else:
+            self._patience += 1
+            if self._patience >= 5:
+                print(f"  EARLY STOPPING: No improvement in val_loss for 5 rounds.")
+                self._early_stop = True
 
         print(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
 
@@ -356,6 +445,9 @@ class ProgressivePrivacyStrategy(FedAvg):
         }
         self.experiments_log.append(record)
         self._save(new_global_params_ndarrays)
+
+        if self._early_stop:
+            return None, {"early_stop": True}
 
         return agg_params, {}
 
@@ -423,6 +515,8 @@ def server_fn(context: Context):
         target_epsilon=context.run_config.get("target-epsilon", 3.0),
         num_rounds=num_rounds,
         initial_parameters=init_parameters,
+        fit_metrics_aggregation_fn=weighted_average,
+        evaluate_metrics_aggregation_fn=weighted_average,
     )
 
     return ServerAppComponents(
