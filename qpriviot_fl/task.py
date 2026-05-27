@@ -119,11 +119,13 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
     train_partition = fds.load_partition(partition_id, "train")
     train_partition = train_partition.with_transform(apply_transforms)
     train_partition.set_format('torch')  # <--- PREVIOUS FIX: Set PyTorch format
-    train_loader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    # num_workers=0: in Flower simulation each virtual client is already a Ray actor;
+    # forked workers create 10×2×2=40 extra processes in parallel and exhaust memory.
+    train_loader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False)
 
     val_set = val_set.with_transform(apply_transforms)
     val_set.set_format('torch')  # <--- PREVIOUS FIX: Set PyTorch format
-    val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=2, pin_memory=True)
+    val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=0, pin_memory=False)
 
     return train_loader, val_loader
 

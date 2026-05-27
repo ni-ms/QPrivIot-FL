@@ -188,9 +188,10 @@ class SensitivityTracker:
             if len(norms) > 1:
                 raw_std[name] = float(np.std(norms))
             else:
-                # Round 1 fallback: use the norm itself as a differentiator
-                # (layers with larger gradients are more sensitive)
-                raw_std[name] = norms[0] if norms else 0.1
+                # Not enough history yet — use neutral value so all layers start equal.
+                # Using norms[0] here caused large layers (fc1, 262k params) to be
+                # flagged high-sensitivity purely from dimensionality, not data sensitivity.
+                raw_std[name] = 1.0
             raw_impact[name] = abs(self.second_moments.get(name, 0.0))
 
         # Step 2: Normalize each component independently to mean 1.0
@@ -231,21 +232,26 @@ def allocate_adaptive_noise(
         sensitivities: Dict[str, float],
         target_epsilon: float,
         target_delta: float = 1e-5,
-        base_clip_norm: float = 1.0
+        base_clip_norm: float = 1.0,
+        base_sigma: Optional[float] = None,
 ) -> Tuple[Dict[str, float], Dict[str, float], float]:
     """
     Allocate layer-specific noise based on AdaPriv sensitivity s_j.
-    
+
     High sensitivity s_j -> Lower clipping C_j + Higher noise sigma_j
     This provides "stronger privacy guarantees" for sensitive parameters.
-    
+
+    Args:
+        base_sigma: If provided (Opacus-calibrated sigma), use it directly as the
+                    global noise scale instead of deriving one from target_epsilon.
+                    This ensures the per-layer noise is anchored to the formally
+                    calibrated value and the accountant stays consistent.
+
     References: AdaPriv Section 3.3 & 3.5
     """
-    # Calibration: Instead of a conservative full-budget Gaussian mechanism,
-    # we use a per-round scaling that relates target_epsilon to sigma.
-    # In DP-SGD, sigma approx 1.0/epsilon is a standard heuristic for sub-privacy budgets.
-    # We apply formal Gaussian mechanism calibration using the target_delta.
-    base_sigma = math.sqrt(2 * math.log(1.25 / target_delta)) / max(target_epsilon, 1e-6)
+    if base_sigma is None or base_sigma <= 0:
+        # Fallback: single-shot Gaussian mechanism calibration from epsilon
+        base_sigma = math.sqrt(2 * math.log(1.25 / target_delta)) / max(target_epsilon, 1e-6)
 
     if not sensitivities:
         # Default if no sensitivity data yet - return empty dicts and base_sigma
@@ -259,15 +265,13 @@ def allocate_adaptive_noise(
         if not (0 < s_j < float('inf')):
             s_j = 1.0  # Fallback to neutral sensitivity
         
-        # Adaptive Clipping: Sensitivity s_j scales the clipping norm
-        # High s_j -> Lower clip_j (more protection)
-        # We add a floor and cap to s_j for clipping stability
-        s_j_clip = np.clip(s_j, 0.5, 2.0)
-        clip_j = base_clip_norm / s_j_clip
-        
-        # Adaptive Noise: Sensitivity s_j scales the noise multiplier
-        # High s_j -> Higher sigma_j (more protection)
-        noise_multipliers[layer_name] = base_sigma * s_j
+        # Bound s_j symmetrically for BOTH noise and clip so that
+        # sigma_j × C_j = base_sigma × base_clip_norm (constant product).
+        # The original code multiplied noise by unbounded s_j but clipped
+        # it for C_j, making noise explode (e.g. s_j=3.5 → σ=23, C=0.5).
+        s_j_bounded = np.clip(s_j, 0.5, 2.0)
+        clip_j = base_clip_norm / s_j_bounded   # high s → tighter clip
+        noise_multipliers[layer_name] = base_sigma * s_j_bounded  # same bound
         clipping_norms[layer_name] = clip_j
 
     return noise_multipliers, clipping_norms, base_sigma
