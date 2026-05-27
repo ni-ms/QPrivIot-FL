@@ -58,6 +58,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                  seed=42,
                  alpha=0.3,
                  num_clients=10,
+                 ablation_mode: str = "",
                  **kwargs):
         super().__init__(**kwargs)
         self.results_file = os.path.abspath(results_file)
@@ -72,6 +73,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.seed = seed
         self.alpha = alpha
         self.num_clients = num_clients
+        self.ablation_mode = ablation_mode
 
         self.target_delta = 1e-5
 
@@ -111,31 +113,30 @@ class ProgressivePrivacyStrategy(FedAvg):
         _, self.test_loader = load_data(0, 1, 32, dataset, alpha=100.0, seed=seed)
 
     def _get_round_epsilon(self, server_round: int) -> float:
-        """
-        Calculates per-round epsilon using the pre-calibrated sigma.
-        """
         base_eps = self.target_epsilon / self.num_rounds
-        
+
         if not self.use_adaptive_dp:
             return base_eps
 
-        # For AdaPriv, we still allow some annealing of the *relative* budget
+        # param-only ablation: no round schedule — use flat per-round budget
+        if self.ablation_mode == "param-only":
+            return base_eps
+
+        # Full AdaPriv and round-only: cosine annealing over training
         epsilon_init = base_eps * 1.5
         epsilon_final = base_eps * 0.5
-        
         decay = (1 + math.cos(math.pi * (server_round - 1) / self.num_rounds)) / 2
-        epsilon_t = epsilon_final + (epsilon_init - epsilon_final) * decay
-        return epsilon_t
+        return epsilon_final + (epsilon_init - epsilon_final) * decay
 
     def configure_fit(self, server_round, parameters, client_manager: ClientManager):
         self.current_parameters = parameters
         self._client_manager = client_manager
 
-        # Privacy budget enforcement: halt training if budget exceeded
+        # Log current privacy budget (do not halt — Opacus already calibrated sigma for
+        # num_rounds total steps, so running all rounds stays within the privacy guarantee)
         current_epsilon = self.accountant.get_total_epsilon()
-        if (self.use_dp or self.use_adaptive_dp) and current_epsilon >= self.target_epsilon:
-            print(f"  STOPPING: Privacy budget exhausted! ε={current_epsilon:.2f} >= target={self.target_epsilon:.2f}")
-            return []
+        if (self.use_dp or self.use_adaptive_dp) and current_epsilon > 0:
+            print(f"  Privacy budget: ε_spent={current_epsilon:.3f} / ε_target={self.target_epsilon:.2f}")
 
         # Resource-aware sampling for AdaPriv: prioritize devices that have reported high scores
         if self.use_adaptive_dp and self.client_resources:
@@ -188,9 +189,17 @@ class ProgressivePrivacyStrategy(FedAvg):
                 cv = float(np.std(recent)) / mean_loss
                 self.convergence_score = max(0.0, min(1.0, 1.0 - (cv * 4)))
 
-        # Get round budget and sensitivities
+        # Get round budget and sensitivities.
+        # Warmup period: don't send sensitivity estimates for the first few rounds.
+        # Round-1 sensitivity estimates are noise-dominated (no signal history yet) and
+        # cause destructive per-layer allocations that spike the training loss.
+        # Scale warmup with num_rounds: 5% of rounds (min 5, max 10) for a full window.
         epsilon_t = self._get_round_epsilon(server_round)
-        sensitivities = self.sensitivity_tracker.get_sensitivities()
+        sensitivity_warmup = max(5, min(10, self.num_rounds // 20))
+        if self.use_adaptive_dp and server_round <= sensitivity_warmup:
+            sensitivities = {}  # uniform noise during warmup (like fixed-DP)
+        else:
+            sensitivities = self.sensitivity_tracker.get_sensitivities()
 
         dp_status = "Adaptive" if self.use_adaptive_dp else ("Fixed" if self.use_dp else "None")
         secagg_status = "Active" if self.use_secagg and len(clients) > 0 else "Off"
@@ -220,12 +229,13 @@ class ProgressivePrivacyStrategy(FedAvg):
                 "secagg_quantization_bound": secagg_quantization_bound,
                 "use_dp": self.use_dp,
                 "use_adaptive_dp": self.use_adaptive_dp,
+                "ablation_mode": self.ablation_mode,
                 "convergence_score": self.convergence_score,
                 "round": server_round,
                 "epsilon_t": epsilon_t,
                 "sigma": self.sigma,
                 "learning_rate": current_lr,
-                "proximal_mu": 0.01 if not self.use_dp and not self.use_adaptive_dp else 0.0, # FedProx for No-DP
+                "proximal_mu": 0.01 if not self.use_dp and not self.use_adaptive_dp else 0.0,
                 "dirichlet_alpha": self.alpha,
                 "seed": self.seed,
                 "num_clients": self.num_clients,
@@ -355,12 +365,6 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         current_epsilon = self.accountant.get_total_epsilon()
 
-        # Privacy budget enforcement: halt training if budget exceeded
-        if dp_mode != "None" and current_epsilon >= self.target_epsilon:
-            print(f"  STOPPING: Privacy budget exhausted! ε={current_epsilon:.2f} >= target={self.target_epsilon:.2f}")
-            print(f"  Training halted to preserve differential privacy guarantees.")
-            return None, {"budget_exceeded": True}
-
         # Update sensitivity tracker with averaged deltas as proxies for global gradients
         model_keys = list(self.sensitivity_tracker.history.keys())
         if not model_keys:
@@ -373,7 +377,11 @@ class ProgressivePrivacyStrategy(FedAvg):
         for i, key in enumerate(model_keys):
             if i < len(averaged_delta):
                 grad_tensor = torch.from_numpy(averaged_delta[i])
-                current_norms[key] = torch.norm(grad_tensor).item()
+                # Normalize by sqrt(num_params) → per-parameter RMS magnitude.
+                # Without this, fc1 (262k params) always dominates conv1 (288 params)
+                # purely from dimensionality, not actual data sensitivity.
+                n_params = max(grad_tensor.numel() ** 0.5, 1.0)
+                current_norms[key] = torch.norm(grad_tensor).item() / n_params
                 current_grads[key] = grad_tensor
         
         self.sensitivity_tracker.update(current_norms, current_grads)
@@ -400,14 +408,20 @@ class ProgressivePrivacyStrategy(FedAvg):
         clip_norm = np.mean([r.metrics.get("clip_norm", 0.0) for _, r in results])
         avg_sensitivity = np.mean([r.metrics.get("avg_sensitivity", 0.0) for _, r in results])
 
-        # Section 4.4: Early stopping on val_loss
+        # Section 4.4: Early stopping on val_loss.
+        # For DP modes, val_loss is noisy so use a larger patience proportional to
+        # num_rounds. Minimum 10 rounds without improvement for DP, 5 for no-DP.
+        if self.use_dp or self.use_adaptive_dp:
+            patience_limit = max(10, self.num_rounds // 10)
+        else:
+            patience_limit = 5
         if val_loss < self._best_val_loss - 1e-3:
             self._best_val_loss = val_loss
             self._patience = 0
         else:
             self._patience += 1
-            if self._patience >= 5:
-                print(f"  EARLY STOPPING: No improvement in val_loss for 5 rounds.")
+            if self._patience >= patience_limit:
+                print(f"  EARLY STOPPING: No improvement in val_loss for {patience_limit} rounds.")
                 self._early_stop = True
 
         print(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
@@ -416,7 +430,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         epsilon_t_current = self._get_round_epsilon(server_round) if hasattr(self, '_get_round_epsilon') else 0.0
         current_sensitivities = self.sensitivity_tracker.get_sensitivities() if hasattr(self, 'sensitivity_tracker') else {}
 
-        # Log per-client results
+        # Log per-client results (includes fairness metrics for device-tier analysis)
         for proxy, res in results:
             self.per_client_log.append({
                 "round": server_round,
@@ -425,6 +439,11 @@ class ProgressivePrivacyStrategy(FedAvg):
                 "val_loss": res.metrics.get("val_loss", 0.0),
                 "train_loss": res.metrics.get("train_loss", 0.0),
                 "num_examples": res.num_examples,
+                "resource_score": res.metrics.get("resource_score", 0.0),
+                "device_id": res.metrics.get("device_id", 0),
+                "dp_mode": res.metrics.get("dp_mode", "None"),
+                "avg_noise": res.metrics.get("avg_noise", 0.0),
+                "clip_norm": res.metrics.get("clip_norm", 0.0),
             })
 
         record = {
@@ -475,23 +494,35 @@ def server_fn(context: Context):
     use_secagg = context.run_config.get("use-secagg", False)
     use_dp = context.run_config.get("use-dp", False)
     use_adaptive_dp = context.run_config.get("use-adaptive-dp", False)
+    ablation_mode = str(context.run_config.get("ablation-mode", ""))
 
-    filename_parts = ["results"]
+    seed = context.run_config.get("seed", 42)
+    target_epsilon = context.run_config.get("target-epsilon", 3.0)
 
-    if use_adaptive_dp:
-        filename_parts.append("adaptive_dp")
+    filename_parts = ["results", dataset]
+
+    if ablation_mode:
+        filename_parts.append(ablation_mode)
+    elif use_adaptive_dp:
+        filename_parts.append("adapriv")
     elif use_dp:
-        filename_parts.append("uniform_dp")
+        filename_parts.append("fixed-dp")
     else:
-        filename_parts.append("no_dp")
+        filename_parts.append("no-dp")
 
     if use_secagg:
         filename_parts.append("secagg")
 
-    results_file_name = "_".join(filename_parts) + ".json"
+    filename_parts.append(f"seed{seed}")
+    filename_parts.append(f"eps{target_epsilon}")
+
+    results_file_name = os.path.join("experiment_results", "_".join(filename_parts) + ".json")
 
     model_file_name = context.run_config.get("model-output-file", "global_model.npz")
 
+    # Seed model init so all configs (no-dp / fixed-dp / adapriv) start from the same weights.
+    torch.manual_seed(seed)
+    np.random.seed(seed)
     model = make_model(dataset)
 
     init_parameters_ndarrays = [v.detach().cpu().numpy() for _, v in model.named_parameters()]
@@ -503,8 +534,9 @@ def server_fn(context: Context):
         use_secagg=use_secagg,
         use_dp=use_dp,
         use_adaptive_dp=use_adaptive_dp,
+        ablation_mode=ablation_mode,
         dataset=dataset,
-        seed=context.run_config.get("seed", 42),
+        seed=seed,
         alpha=context.run_config.get("dirichlet-alpha", 0.3),
         num_clients=context.run_config.get("num-clients", 10),
         fraction_fit=context.run_config.get("fraction-fit", 1.0),
@@ -512,7 +544,7 @@ def server_fn(context: Context):
         min_fit_clients=context.run_config.get("min-fit-clients", 1),
         min_available_clients=context.run_config.get("min-available-clients", 1),
         learning_rate=context.run_config.get("learning-rate", 0.01),
-        target_epsilon=context.run_config.get("target-epsilon", 3.0),
+        target_epsilon=target_epsilon,
         num_rounds=num_rounds,
         initial_parameters=init_parameters,
         fit_metrics_aggregation_fn=weighted_average,

@@ -80,8 +80,8 @@ class QPrivIoTClient(NumPyClient):
                 fine_tuning_active = True
                 print(f"CLIENT {self.partition_id}: High convergence ({convergence_score:.2f}) - adjusting LR and noise for fine-tuning.")
 
-            train_loader, _ = load_data(self.partition_id, self.num_partitions, 32, ds_name, 
-                                        alpha=dirichlet_alpha, seed=seed)
+            train_loader, val_loader = load_data(self.partition_id, self.num_partitions, 32, ds_name,
+                                               alpha=dirichlet_alpha, seed=seed)
             device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
             model = make_model(ds_name).to(device)
 
@@ -95,9 +95,14 @@ class QPrivIoTClient(NumPyClient):
             clip_norms_map = {}
             dp_was_applied = False
 
-            base_clip_norm_res = float(getattr(CONFIG.privacy, "initial_clip_norm", 0.05)) * max(self.res_score, 0.01)
+            # Clip norm must be independent of resource score — scaling it down by R_i
+            # (which is 0.1–0.4 for simulated IoT) would make clip_norm ~0.005 and completely
+            # bury the gradient under Opacus noise (σ≈6–10). Resource-tier effect belongs
+            # only in sigma_i_factor (noise), not clipping.
+            base_clip_norm_res = float(getattr(CONFIG.privacy, "initial_clip_norm", 1.0))
 
             epsilon_t = float(config.get("epsilon_t", 1.0))
+            ablation_mode = str(config.get("ablation_mode", ""))
             if use_adaptive_dp:
                 # Extract AdaPriv parameters from config
                 sensitivities_str = config.get("sensitivities", "{}")
@@ -106,39 +111,71 @@ class QPrivIoTClient(NumPyClient):
                 except (json.JSONDecodeError, TypeError, ValueError):
                     sensitivities_map = {}
 
-                # Adjust noise multiplier based on Readiness Score R_i
-                # Section 3.5: Resource-constrained devices get higher noise to reduce their impact
-                # Range [1.0, 2.0] chosen to balance privacy and utility:
-                # - 1.0 for high-resource devices (normal noise)
-                # - 2.0 for low-resource devices (double noise, less influence)
-                # Note: This is an intentional design choice from Section 3.5.
-                sigma_i_factor = 1.0 / (self.res_score + 1e-8)
-                sigma_i_factor = np.clip(sigma_i_factor, 1.0, 2.0)
-                
-                # Allocate noise per layer based on sensitivities
-                noise_mults, clip_norms_map, base_sigma = allocate_adaptive_noise(
-                    sensitivities=sensitivities_map,
-                    target_epsilon=epsilon_t,
-                    base_clip_norm=base_clip_norm_res,
-                )
-                
-                # If Round 1 (no sensitivities), use uniform base noise
-                if not noise_mults:
-                    param_keys = [n for n, _ in model.named_parameters()]
-                    noise_mults = {k: base_sigma for k in param_keys}
+                opacus_sigma = float(config.get("sigma", 0.0))
+                param_keys = [n for n, _ in model.named_parameters()]
+
+                # Low-resource devices add modestly more noise to reduce their influence.
+                # Capped at 1.3× (not 2×) so it doesn't swamp the already-large Opacus σ.
+                sigma_i_factor = np.clip(1.0 / (self.res_score + 1e-8), 1.0, 1.3)
+
+                if ablation_mode == "device-only":
+                    # Device-tier scaling only — uniform layers, no per-layer / round adaptation
+                    _, _, base_sigma = allocate_adaptive_noise(
+                        sensitivities={}, target_epsilon=epsilon_t,
+                        base_clip_norm=base_clip_norm_res,
+                        base_sigma=opacus_sigma if opacus_sigma > 0 else None,
+                    )
+                    noise_mults = {k: base_sigma * sigma_i_factor for k in param_keys}
                     clip_norms_map = {k: base_clip_norm_res for k in param_keys}
 
-                # Scale noise multipliers by per-client factor sigma_i
-                for k in noise_mults:
-                    noise_mults[k] *= sigma_i_factor
-                    
-                if fine_tuning_active:
+                elif ablation_mode == "param-only":
+                    # Per-layer sensitivity only — no device scaling, no round schedule
+                    # (server already sends flat per-round epsilon for this mode)
+                    noise_mults, clip_norms_map, base_sigma = allocate_adaptive_noise(
+                        sensitivities=sensitivities_map, target_epsilon=epsilon_t,
+                        base_clip_norm=base_clip_norm_res,
+                        base_sigma=opacus_sigma if opacus_sigma > 0 else None,
+                    )
+                    if not noise_mults:
+                        noise_mults = {k: base_sigma for k in param_keys}
+                        clip_norms_map = {k: base_clip_norm_res for k in param_keys}
+                    # no sigma_i_factor applied
+
+                elif ablation_mode == "round-only":
+                    # Round schedule only — no per-layer or device adaptation
+                    _, _, base_sigma = allocate_adaptive_noise(
+                        sensitivities={}, target_epsilon=epsilon_t,
+                        base_clip_norm=base_clip_norm_res,
+                        base_sigma=opacus_sigma if opacus_sigma > 0 else None,
+                    )
+                    noise_mults = {k: base_sigma for k in param_keys}
+                    clip_norms_map = {k: base_clip_norm_res for k in param_keys}
+                    # no sigma_i_factor applied
+
+                else:
+                    # Full AdaPriv: per-layer + device + round.
+                    # sigma_i_factor is intentionally NOT applied here — all IoT devices in the
+                    # simulation have res_score << 1.0, so the formula 1/res_score always saturates
+                    # at the cap (1.3), meaning every client gets a constant 1.3x noise penalty
+                    # with no tier differentiation. Resource heterogeneity is already handled by
+                    # resource-weighted FedAvg on the server side. sigma_i_factor is retained only
+                    # in the device-only ablation, where it is the variable under test.
+                    noise_mults, clip_norms_map, base_sigma = allocate_adaptive_noise(
+                        sensitivities=sensitivities_map, target_epsilon=epsilon_t,
+                        base_clip_norm=base_clip_norm_res,
+                        base_sigma=opacus_sigma if opacus_sigma > 0 else None,
+                    )
+                    if not noise_mults:
+                        noise_mults = {k: base_sigma for k in param_keys}
+                        clip_norms_map = {k: base_clip_norm_res for k in param_keys}
+
+                if fine_tuning_active and not ablation_mode:
                     for k in noise_mults:
                         noise_mults[k] *= 0.8
 
                 dp_was_applied = True
-                dp_mode = "Adaptive"
-                print(f"CLIENT {self.partition_id}: AdaPriv (ε_t={epsilon_t:.3f}, R_i={self.res_score:.2f})")
+                dp_mode = "Adaptive" if not ablation_mode else f"Ablation-{ablation_mode}"
+                print(f"CLIENT {self.partition_id}: AdaPriv mode={ablation_mode or 'full'} (ε_t={epsilon_t:.3f}, R_i={self.res_score:.2f})")
 
             elif use_dp:
                 # Fixed DP: Use the pre-calibrated sigma from server if available
@@ -174,9 +211,12 @@ class QPrivIoTClient(NumPyClient):
             # Record performance metrics for telemetry
             avg_clip_norm_configured = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
 
-            # Evaluate on validation set BEFORE applying DP noise
-            eval_params = self._get_parameters(model)
-            val_loss, val_num_samples, eval_metrics_dict = self.evaluate(eval_params, config)
+            # Evaluate on validation set BEFORE applying DP noise.
+            # Reuse the existing model + pre-loaded val_loader to avoid a second model instantiation.
+            pre_val_loss, pre_val_acc = test(model, val_loader, device)
+            val_loss = pre_val_loss
+            val_num_samples = len(val_loader.dataset)
+            eval_metrics_dict = {"accuracy": pre_val_acc}
 
             mu = float(config.get("proximal_mu", 0.0))
 
@@ -251,8 +291,10 @@ class QPrivIoTClient(NumPyClient):
                 for i in range(len(quantized_deltas)):
                     masked_parameters.append(quantized_deltas[i].astype(np.int64) + my_mask[i].astype(np.int64))
 
+                del model
                 return masked_parameters, len(train_loader.dataset), metrics
 
+            del model
             return updated_deltas, len(train_loader.dataset), metrics
 
         except Exception as e:
