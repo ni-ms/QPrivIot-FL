@@ -48,14 +48,14 @@ clientapp = "qpriviot_fl.client_app:app"
 
 # Custom config values accessible via `context.run_config`
 [tool.flwr.app.config]
-num-server-rounds = 50
+num-server-rounds = 100
 fraction-fit = 1.0
 fraction-evaluate = 1.0
 min-fit-clients = 8
 min-available-clients = 8
 batch-size = 32
 local-epochs = 1
-learning-rate = 0.05
+learning-rate = 0.01
 dataset = "cifar10"
 num-shares = 3
 reconstruction-threshold = 2
@@ -63,6 +63,7 @@ max-weight = 10000
 use-secagg = false
 use-dp = false
 use-adaptive-dp = false
+ablation-mode = ""
 target-epsilon = 12.0
 base-noise = 0.3
 seed = 1337
