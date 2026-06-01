@@ -7,6 +7,7 @@ import random
 import secrets
 import torch
 import pandas as pd
+from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 
 from opacus.accountants.utils import get_noise_multiplier
@@ -28,6 +29,10 @@ from flwr.server.client_proxy import ClientProxy
 
 from qpriviot_fl.privacy_utils import RenyiPrivacyAccountant, dequantize, SensitivityTracker, allocate_adaptive_noise
 from qpriviot_fl.task import make_model, load_data, test
+
+
+def _log(msg: str) -> None:
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
 
 def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
@@ -96,7 +101,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                 sample_rate=self.fraction_fit,
                 epochs=self.num_rounds
             )
-            print(f"  [DP CALIBRATION] Target ε={target_epsilon}, T={num_rounds}, q={self.fraction_fit} => σ={self.sigma:.4f}")
+            _log(f"  [DP CALIBRATION] Target ε={target_epsilon}, T={num_rounds}, q={self.fraction_fit} => σ={self.sigma:.4f}")
         else:
             self.sigma = 0.0
 
@@ -136,7 +141,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         # num_rounds total steps, so running all rounds stays within the privacy guarantee)
         current_epsilon = self.accountant.get_total_epsilon()
         if (self.use_dp or self.use_adaptive_dp) and current_epsilon > 0:
-            print(f"  Privacy budget: ε_spent={current_epsilon:.3f} / ε_target={self.target_epsilon:.2f}")
+            _log(f"  Privacy budget: ε_spent={current_epsilon:.3f} / ε_target={self.target_epsilon:.2f}")
 
         # Resource-aware sampling for AdaPriv: prioritize devices that have reported high scores
         if self.use_adaptive_dp and self.client_resources:
@@ -203,7 +208,7 @@ class ProgressivePrivacyStrategy(FedAvg):
 
         dp_status = "Adaptive" if self.use_adaptive_dp else ("Fixed" if self.use_dp else "None")
         secagg_status = "Active" if self.use_secagg and len(clients) > 0 else "Off"
-        print(f"\n--- Round {server_round} [DP: {dp_status}, SecAgg: {secagg_status}, Conv: {self.convergence_score:.2f}, ε_t: {epsilon_t:.3f}] ---")
+        _log(f"\n--- Round {server_round} [DP: {dp_status}, SecAgg: {secagg_status}, Conv: {self.convergence_score:.2f}, ε_t: {epsilon_t:.3f}] ---")
 
         # Baseline learning rate passed during init
         base_lr = self.learning_rate
@@ -239,6 +244,9 @@ class ProgressivePrivacyStrategy(FedAvg):
                 "dirichlet_alpha": self.alpha,
                 "seed": self.seed,
                 "num_clients": self.num_clients,
+                "num_rounds": self.num_rounds,
+                "target_epsilon": self.target_epsilon,
+                "avg_resource_score": float(np.mean(list(self.client_resources.values()))) if self.client_resources else 0.3,
                 "sensitivities": json.dumps(clamped_sensitivities)
             }
 
@@ -267,7 +275,7 @@ class ProgressivePrivacyStrategy(FedAvg):
             param.data = tensor.view(param.shape)
             
         loss, accuracy = test(model, self.test_loader, device)
-        print(f"  [CENTRALIZED EVAL] Round {server_round}: loss={loss:.4f}, accuracy={accuracy:.4f}")
+        _log(f"  [CENTRALIZED EVAL] Round {server_round}: loss={loss:.4f}, accuracy={accuracy:.4f}")
         return loss, {"accuracy": accuracy}
 
     def aggregate_fit(self, server_round, results, failures):
@@ -276,7 +284,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         NOTE: clients return DELTAS, not full weights. Do not call super().aggregate_fit()!
         """
         if not results:
-            print("  No clients returned results. Skipping aggregation.")
+            _log("  No clients returned results. Skipping aggregation.")
             return None, {}
 
         # Update local knowledge of client resources
@@ -296,9 +304,7 @@ class ProgressivePrivacyStrategy(FedAvg):
             # print(f"DEBUG: Round {server_round} aggregated. Known resources: {len(self.client_resources)}, Avg: {avg_res:.2f}")
 
         if self.current_parameters is None:
-            print(
-                "  Error: Global model parameters (self.current_parameters) are not available. Cannot proceed with aggregation."
-            )
+            _log("  Error: Global model parameters (self.current_parameters) are not available. Cannot proceed with aggregation.")
             return None, {}
 
         current_parameters_ndarrays = parameters_to_ndarrays(self.current_parameters)
@@ -308,7 +314,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         averaged_delta = []
         if is_secagg_round:
             quantization_bound = results[0][1].metrics.get("secagg_quantization_bound", 10.0)
-            print(f"  Aggregating Masked Updates (SecAgg: Summing Integers, bound: {quantization_bound})...")
+            _log(f"  Aggregating Masked Updates (SecAgg: Summing Integers, bound: {quantization_bound})...")
 
             first_res_params = parameters_to_ndarrays(results[0][1].parameters)
             aggregated_integers_delta = [
@@ -328,7 +334,7 @@ class ProgressivePrivacyStrategy(FedAvg):
             ]
 
         else:
-            print("  Aggregating Deltas (Resource-Weighted FedAvg)...")
+            _log("  Aggregating Deltas (Resource-Weighted FedAvg)...")
             # In AdaPriv, we weight updates by both sample count and the reported readiness score
             # This incentivizes participation from high-resource devices
             if self.use_adaptive_dp:
@@ -412,19 +418,19 @@ class ProgressivePrivacyStrategy(FedAvg):
         # For DP modes, val_loss is noisy so use a larger patience proportional to
         # num_rounds. Minimum 10 rounds without improvement for DP, 5 for no-DP.
         if self.use_dp or self.use_adaptive_dp:
-            patience_limit = max(10, self.num_rounds // 10)
+            patience_limit = max(15, self.num_rounds // 5)
         else:
-            patience_limit = 5
+            patience_limit = max(10, self.num_rounds // 4)
         if val_loss < self._best_val_loss - 1e-3:
             self._best_val_loss = val_loss
             self._patience = 0
         else:
             self._patience += 1
             if self._patience >= patience_limit:
-                print(f"  EARLY STOPPING: No improvement in val_loss for {patience_limit} rounds.")
+                _log(f"  EARLY STOPPING: No improvement in val_loss for {patience_limit} rounds.")
                 self._early_stop = True
 
-        print(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
+        _log(f"  Total Epsilon: {current_epsilon:.2f} | Avg. Loss: {avg_loss:.4f} | Val Acc: {val_accuracy:.4f}")
 
         # Get per-round epsilon and sensitivities for plotting
         epsilon_t_current = self._get_round_epsilon(server_round) if hasattr(self, '_get_round_epsilon') else 0.0
@@ -481,7 +487,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                 self.results_file.replace(".json", "_per_client.csv"), index=False
             )
 
-        print(f"  Saving global model to {self.model_file}...")
+        _log(f"  Saving global model to {self.model_file}...")
         np.savez(self.model_file, *aggregated_model_ndarrays)
 
 

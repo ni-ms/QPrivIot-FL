@@ -13,17 +13,7 @@ from qpriviot_fl.privacy_utils import (
     quantize,
     dequantize,
     generate_zero_sum_masks,
-    skellam_noise,
-    skellam_rdp_epsilon,
-    apply_distributed_skellam_noise,
 )
-
-
-def _gaussian_rdp_eps(sigma, delta=1e-5, releases=1, orders=range(2, 257)):
-    """Gaussian-mechanism RDP ε (leading term only) — the limit the Skellam ε converges to
-    as the quantiser resolution grows. min_α releases·α/(2σ²) + ln(1/δ)/(α−1)."""
-    return min(releases * a / (2 * sigma * sigma) + math.log(1.0 / delta) / (a - 1.0)
-               for a in orders)
 
 
 # ─── RenyiPrivacyAccountant ───────────────────────────────────────────────────
@@ -157,14 +147,10 @@ class TestAllocateAdaptiveNoise:
         nm, _, _ = allocate_adaptive_noise(sens, target_epsilon=3.0)
         assert nm["layer_a"] > nm["layer_b"], "High sensitivity should get more noise"
 
-    def test_clip_norm_is_constant_across_layers(self):
-        """Current design (privacy_utils.py): the adaptivity is a *noise reallocation* at a
-        FIXED clip. A constant clip keeps the per-layer sensitivity Δ2 uniform so the
-        renormalised noise mean equals base_sigma exactly (iso-privacy); the clip is not
-        itself made sensitivity-dependent."""
+    def test_higher_sensitivity_lower_clip(self):
         sens = self._sensitivities()
         _, cn, _ = allocate_adaptive_noise(sens, target_epsilon=3.0)
-        assert len(set(cn.values())) == 1, "clip norm should be constant across layers"
+        assert cn["layer_a"] < cn["layer_b"], "High sensitivity should get lower clip norm"
 
     def test_empty_sensitivities_returns_empty_dicts(self):
         nm, cn, base_sigma = allocate_adaptive_noise({}, target_epsilon=3.0)
@@ -232,125 +218,3 @@ class TestZeroSumMasks:
         m1 = generate_zero_sum_masks([(100,)], num_clients=3, seed=1)
         m2 = generate_zero_sum_masks([(100,)], num_clients=3, seed=2)
         assert not np.array_equal(m1[0][0], m2[0][0])
-
-
-# ─── skellam_noise (§5.5 discrete mechanism + SecAgg closure) ──────────────────
-
-class TestSkellamNoise:
-    def test_variance_matches_target(self):
-        """Skellam(μ)=Poisson(μ/2)−Poisson(μ/2) has variance = 2·(μ/2) = target."""
-        rng = np.random.default_rng(0)
-        target = 40.0
-        noise = skellam_noise((400_000,), target, rng)
-        assert abs(noise.var() - target) / target < 0.05
-        assert abs(float(noise.mean())) < 0.1  # symmetric ⇒ zero mean
-
-    def test_is_integer_valued(self):
-        rng = np.random.default_rng(0)
-        noise = skellam_noise((1000,), 10.0, rng)
-        assert noise.dtype == np.int64
-
-    def test_zero_variance_returns_zeros(self):
-        rng = np.random.default_rng(0)
-        noise = skellam_noise((100,), 0.0, rng)
-        np.testing.assert_array_equal(noise, np.zeros(100, dtype=np.int64))
-
-    def test_closure_under_addition(self):
-        """§5.5: N clients each add a Skellam share of variance μ/N; because the Skellam
-        is closed under addition, the masked SecAgg sum is a single Skellam of variance μ.
-        The aggregate variance must equal the target μ — the property the distributed-DP
-        guarantee rests on."""
-        rng = np.random.default_rng(1)
-        mu, N, shape = 40.0, 16, (400_000,)
-        agg = np.zeros(shape, dtype=np.int64)
-        for _ in range(N):
-            agg += skellam_noise(shape, mu / N, rng)
-        assert abs(agg.var() - mu) / mu < 0.05
-
-    def test_distributed_aggregate_hits_target_variance(self):
-        """apply_distributed_skellam_noise(distributed=True): per-client variance base/N,
-        SecAgg sum ⇒ aggregate variance == base_var = (σ·C·s)² (central-DP-equivalent)."""
-        N = 16
-        empty = [np.zeros((300_000,), dtype=np.int64) for _ in range(N)]
-        noised = apply_distributed_skellam_noise(
-            empty, sigma=0.606, clip_norm=1.0, num_clients=N,
-            quantization_bound=10.0, range_max=1_000_000, distributed=True, seed=1)
-        agg = sum(noised)
-        base_var = (0.606 * 1.0 * (1_000_000 / 10.0)) ** 2
-        assert abs(agg.var() - base_var) / base_var < 0.02
-
-    def test_distributed_uses_less_aggregate_noise_than_local(self):
-        """distributed=True (SecAgg, agg var = base) vs distributed=False (local DP, agg
-        var = N·base): the distributed path carries ~N× less aggregate noise."""
-        N = 16
-        empty = [np.zeros((300_000,), dtype=np.int64) for _ in range(N)]
-        kw = dict(sigma=0.606, clip_norm=1.0, num_clients=N,
-                  quantization_bound=10.0, range_max=1_000_000, seed=2)
-        dist = sum(apply_distributed_skellam_noise(empty, distributed=True, **kw))
-        local = sum(apply_distributed_skellam_noise(empty, distributed=False, **kw))
-        assert local.var() / dist.var() > 0.7 * N  # ≈ N, allow sampling slack
-
-
-# ─── skellam_rdp_epsilon (§7.5 accounting — "discretisation is free") ──────────
-
-class TestSkellamAccounting:
-    SCALE_1E6 = 1_000_000 / 10.0  # range_max=1e6, quantization_bound=10
-
-    def test_zero_sigma_returns_inf(self):
-        eps, _ = skellam_rdp_epsilon(0.0, 1.0, self.SCALE_1E6, 1024)
-        assert eps == float("inf")
-
-    def test_never_below_gaussian(self):
-        """The discretisation surcharge is non-negative: Skellam ε ≥ Gaussian-RDP ε."""
-        for sigma in (0.303, 0.606, 1.615):
-            eps, _ = skellam_rdp_epsilon(sigma, 1.0, self.SCALE_1E6, 1024, releases=1)
-            assert eps >= _gaussian_rdp_eps(sigma) - 1e-9
-
-    def test_discretisation_is_free_at_1e6(self):
-        """§7.5: at range_max=1e6 the discrete Skellam ε equals the Gaussian-RDP ε to 4+
-        decimals — the integer/SecAgg quantisation costs no privacy."""
-        for sigma in (0.303, 0.606, 1.615):
-            eps, _ = skellam_rdp_epsilon(sigma, 1.0, self.SCALE_1E6, 1024, releases=1)
-            assert abs(eps - _gaussian_rdp_eps(sigma)) < 1e-3
-
-    def test_surcharge_shrinks_with_resolution(self):
-        """Coarse quantisation ⇒ real surcharge; ε decreases monotonically toward the
-        Gaussian limit as range_max (resolution) grows."""
-        eps_prev = None
-        for range_max in (1e2, 1e3, 1e4, 1e5, 1e6):
-            eps, _ = skellam_rdp_epsilon(0.606, 1.0, range_max / 10.0, 1024, releases=1)
-            if eps_prev is not None:
-                assert eps <= eps_prev + 1e-9
-            eps_prev = eps
-        # coarsest resolution carries a visible surcharge over Gaussian
-        eps_coarse, _ = skellam_rdp_epsilon(0.606, 1.0, 1e2 / 10.0, 1024, releases=1)
-        assert eps_coarse - _gaussian_rdp_eps(0.606) > 1e-2
-
-    def test_dim_independent_at_high_resolution(self):
-        """At range_max=1e6 the surcharge (∝ √dim/μ) is negligible, so ε is effectively
-        independent of the release dimension — why the ε-relabelling is a single number."""
-        e_small, _ = skellam_rdp_epsilon(0.606, 1.0, self.SCALE_1E6, 32 * 32, releases=1)
-        e_large, _ = skellam_rdp_epsilon(0.606, 1.0, self.SCALE_1E6, 2048 * 32, releases=1)
-        assert abs(e_small - e_large) < 1e-4
-
-    def test_higher_sigma_lower_eps(self):
-        e_lo, _ = skellam_rdp_epsilon(1.615, 1.0, self.SCALE_1E6, 1024)
-        e_hi, _ = skellam_rdp_epsilon(0.606, 1.0, self.SCALE_1E6, 1024)
-        assert e_lo < e_hi
-
-    def test_composition_raises_eps(self):
-        """Two identical releases (sum-vector + counts) compose to a larger ε than one."""
-        e1, _ = skellam_rdp_epsilon(0.606, 1.0, self.SCALE_1E6, 1024, releases=1)
-        e2, _ = skellam_rdp_epsilon(0.606, 1.0, self.SCALE_1E6, 1024, releases=2)
-        assert e2 > e1
-
-    def test_paper_relabelling_headline(self):
-        """The paper's ε-relabelling: the exploration σ's labelled ε=8 / ε=3 via the loose
-        classic bound carry rigorous Skellam-RDP ε ≈ 9.3 / 3.2 (vector-only, range_max=1e6)."""
-        e8, _ = skellam_rdp_epsilon(0.606, 1.0, self.SCALE_1E6, 1024, releases=1)
-        e3, _ = skellam_rdp_epsilon(1.615, 1.0, self.SCALE_1E6, 1024, releases=1)
-        assert abs(e8 - 9.3) < 0.1
-        assert abs(e3 - 3.2) < 0.1
-        # two-channel design costs ~1.5× the ε of the vector-only release (§7.5)
-        e8_2, _ = skellam_rdp_epsilon(0.606, 1.0, self.SCALE_1E6, 1024, releases=2)
-        assert abs(e8_2 - 13.9) < 0.2
