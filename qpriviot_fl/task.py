@@ -47,6 +47,27 @@ class FemnistNet(nn.Module):
         return self.fc2(x)
 
 
+class MnistNet(nn.Module):
+    """MNIST / FashionMNIST CNN — 28×28, 1-channel, 10 classes.
+    fc1 (32×7×7 → 64) holds ~94 % of parameters, making it the primary
+    beneficiary of AdaPriv's low-sensitivity noise reduction."""
+
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 16, 3, padding=1)   # 28 → 14 after pool
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(16, 32, 3, padding=1)  # 14 → 7 after pool
+        self.fc1 = nn.Linear(32 * 7 * 7, 64)          # 100 352 params ≈ 94 %
+        self.fc2 = nn.Linear(64, 10)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = x.view(-1, 32 * 7 * 7)
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
+
+
 class IotModel(nn.Module):
     """Simple IoT Sensor Model"""
 
@@ -65,6 +86,8 @@ def make_model(dataset_name: str):
         return IotModel()
     if dataset_name == "femnist":
         return FemnistNet()
+    if dataset_name in ("mnist", "fashion_mnist"):
+        return MnistNet()
     return Net()
 
 
@@ -85,6 +108,10 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
 
     if dataset_name == "femnist":
         hub_dataset_name = "flwrlabs/femnist"
+    elif dataset_name == "mnist":
+        hub_dataset_name = "ylecun/mnist"
+    elif dataset_name == "fashion_mnist":
+        hub_dataset_name = "zalando-datasets/fashion_mnist"
     else:
         hub_dataset_name = "uoft-cs/cifar10"
 
@@ -107,24 +134,28 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
 
     val_set = load_dataset(hub_dataset_name, split="test")
 
-    if dataset_name == "femnist":
+    if dataset_name in ("femnist", "mnist", "fashion_mnist"):
         transforms = Compose([ToTensor(), Normalize((0.5,), (0.5,))])
     else:
         transforms = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
+    # HuggingFace datasets use "img" (CIFAR-10, FEMNIST) or "image" (MNIST, FashionMNIST).
+    # Normalize to "img" and remove the original key so set_format('torch') doesn't
+    # try to convert a leftover PIL column to a tensor and crash.
     def apply_transforms(batch):
-        batch["img"] = [transforms(i) for i in batch["img"]]
+        img_key = "img" if "img" in batch else "image"
+        batch["img"] = [transforms(i) for i in batch[img_key]]
+        if img_key == "image":
+            del batch["image"]
         return batch
 
     train_partition = fds.load_partition(partition_id, "train")
     train_partition = train_partition.with_transform(apply_transforms)
-    train_partition.set_format('torch')  # <--- PREVIOUS FIX: Set PyTorch format
     # num_workers=0: in Flower simulation each virtual client is already a Ray actor;
     # forked workers create 10×2×2=40 extra processes in parallel and exhaust memory.
     train_loader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False)
 
     val_set = val_set.with_transform(apply_transforms)
-    val_set.set_format('torch')  # <--- PREVIOUS FIX: Set PyTorch format
     val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=0, pin_memory=False)
 
     return train_loader, val_loader

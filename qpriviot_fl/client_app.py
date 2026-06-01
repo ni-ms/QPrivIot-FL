@@ -3,6 +3,7 @@ import time
 import torch
 import numpy as np
 import traceback
+from datetime import datetime
 from flwr.client import NumPyClient
 from flwr.clientapp import ClientApp
 from flwr.common import Context
@@ -19,6 +20,10 @@ from qpriviot_fl.privacy_utils import (
 )
 
 DEVICE_MAP = {"raspberry_pi_4": 1, "raspberry_pi_zero": 2, "smartphone": 3, "iot_sensor": 4}
+
+
+def _log(msg: str) -> None:
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
 
 class QPrivIoTClient(NumPyClient):
@@ -54,8 +59,7 @@ class QPrivIoTClient(NumPyClient):
 
             cutoff = float(getattr(CONFIG.resource, "min_eligible_score", 0.2))
             if self.res_score < cutoff:
-                print(
-                    f"CLIENT {self.partition_id}: Skipped due to low resource score ({self.res_score:.2f} < {cutoff:.2f})")
+                _log(f"CLIENT {self.partition_id}: Skipped due to low resource score ({self.res_score:.2f} < {cutoff:.2f})")
                 return parameters, 0, {
                     "resource_score": self.res_score,
                     "client_latency": base_latency,
@@ -78,7 +82,7 @@ class QPrivIoTClient(NumPyClient):
             if convergence_score > 0.8:
                 learning_rate *= 0.5
                 fine_tuning_active = True
-                print(f"CLIENT {self.partition_id}: High convergence ({convergence_score:.2f}) - adjusting LR and noise for fine-tuning.")
+                _log(f"CLIENT {self.partition_id}: High convergence ({convergence_score:.2f}) - adjusting LR and noise for fine-tuning.")
 
             train_loader, val_loader = load_data(self.partition_id, self.num_partitions, 32, ds_name,
                                                alpha=dirichlet_alpha, seed=seed)
@@ -114,31 +118,39 @@ class QPrivIoTClient(NumPyClient):
                 opacus_sigma = float(config.get("sigma", 0.0))
                 param_keys = [n for n, _ in model.named_parameters()]
 
-                # Low-resource devices add modestly more noise to reduce their influence.
-                # Capped at 1.3× (not 2×) so it doesn't swamp the already-large Opacus σ.
-                sigma_i_factor = np.clip(1.0 / (self.res_score + 1e-8), 1.0, 1.3)
-
                 if ablation_mode == "device-only":
-                    # Device-tier scaling only — uniform layers, no per-layer / round adaptation
+                    # Device-tier scaling only — uniform layers, no per-layer / round adaptation.
+                    # Use relative formula avg/res_i so that above-average devices get factor≈1.0
+                    # and below-average devices get proportionally more noise. The absolute 1/res_i
+                    # formula saturates at the cap for every simulated IoT device (verified: all
+                    # 10 partitions get exactly 1.3×), eliminating any device differentiation.
                     _, _, base_sigma = allocate_adaptive_noise(
                         sensitivities={}, target_epsilon=epsilon_t,
                         base_clip_norm=base_clip_norm_res,
                         base_sigma=opacus_sigma if opacus_sigma > 0 else None,
                     )
+                    avg_resource_score = float(config.get("avg_resource_score", 0.3))
+                    sigma_i_factor = float(np.clip(avg_resource_score / (self.res_score + 1e-8), 1.0, 1.5))
                     noise_mults = {k: base_sigma * sigma_i_factor for k in param_keys}
                     clip_norms_map = {k: base_clip_norm_res for k in param_keys}
 
                 elif ablation_mode == "param-only":
-                    # Per-layer sensitivity only — no device scaling, no round schedule
-                    # (server already sends flat per-round epsilon for this mode)
+                    # Per-layer sensitivity only — no device scaling, no round schedule.
+                    # Biases are excluded from sensitivity-based allocation: they are global
+                    # offsets that don't interact with individual input features and have
+                    # negligible per-sample privacy leakage. Adaptive allocation applies
+                    # only to weight matrices; biases receive base (fixed-DP equivalent) noise.
+                    weight_sensitivities = {k: v for k, v in sensitivities_map.items()
+                                            if not k.endswith('.bias')}
                     noise_mults, clip_norms_map, base_sigma = allocate_adaptive_noise(
-                        sensitivities=sensitivities_map, target_epsilon=epsilon_t,
+                        sensitivities=weight_sensitivities, target_epsilon=epsilon_t,
                         base_clip_norm=base_clip_norm_res,
                         base_sigma=opacus_sigma if opacus_sigma > 0 else None,
                     )
-                    if not noise_mults:
-                        noise_mults = {k: base_sigma for k in param_keys}
-                        clip_norms_map = {k: base_clip_norm_res for k in param_keys}
+                    for k in param_keys:
+                        if k not in noise_mults:
+                            noise_mults[k] = base_sigma
+                            clip_norms_map[k] = base_clip_norm_res
                     # no sigma_i_factor applied
 
                 elif ablation_mode == "round-only":
@@ -150,24 +162,42 @@ class QPrivIoTClient(NumPyClient):
                     )
                     noise_mults = {k: base_sigma for k in param_keys}
                     clip_norms_map = {k: base_clip_norm_res for k in param_keys}
-                    # no sigma_i_factor applied
+                    # Apply round noise factor: epsilon_t from cosine schedule drives noise up/down
+                    _num_rounds = int(config.get("num_rounds", self.run_config.get("num-server-rounds", 100)))
+                    _base_eps = float(config.get("target_epsilon", 3.0)) / max(_num_rounds, 1)
+                    _round_noise_factor = float(np.clip(_base_eps / max(epsilon_t, 1e-6), 0.5, 2.0))
+                    for k in noise_mults:
+                        noise_mults[k] *= _round_noise_factor
 
                 else:
                     # Full AdaPriv: per-layer + device + round.
-                    # sigma_i_factor is intentionally NOT applied here — all IoT devices in the
-                    # simulation have res_score << 1.0, so the formula 1/res_score always saturates
-                    # at the cap (1.3), meaning every client gets a constant 1.3x noise penalty
-                    # with no tier differentiation. Resource heterogeneity is already handled by
-                    # resource-weighted FedAvg on the server side. sigma_i_factor is retained only
-                    # in the device-only ablation, where it is the variable under test.
+                    # Same bias-exclusion rationale as param-only: biases receive base noise.
+                    weight_sensitivities = {k: v for k, v in sensitivities_map.items()
+                                            if not k.endswith('.bias')}
                     noise_mults, clip_norms_map, base_sigma = allocate_adaptive_noise(
-                        sensitivities=sensitivities_map, target_epsilon=epsilon_t,
+                        sensitivities=weight_sensitivities, target_epsilon=epsilon_t,
                         base_clip_norm=base_clip_norm_res,
                         base_sigma=opacus_sigma if opacus_sigma > 0 else None,
                     )
-                    if not noise_mults:
-                        noise_mults = {k: base_sigma for k in param_keys}
-                        clip_norms_map = {k: base_clip_norm_res for k in param_keys}
+                    for k in param_keys:
+                        if k not in noise_mults:
+                            noise_mults[k] = base_sigma
+                            clip_norms_map[k] = base_clip_norm_res
+                    # Device-tier: normalize against the cohort average so high-resource clients
+                    # get factor≈1.0 and low-resource clients get proportionally more noise.
+                    # Uses relative scaling (avg/res_i) instead of absolute 1/res_i to avoid
+                    # constant saturation when every client has a low absolute res_score.
+                    avg_resource_score = float(config.get("avg_resource_score", 0.3))
+                    sigma_i_factor = float(np.clip(avg_resource_score / (self.res_score + 1e-8), 1.0, 1.5))
+                    for k in noise_mults:
+                        noise_mults[k] *= sigma_i_factor
+                    # Round schedule: cosine-annealed epsilon_t drives noise — more noise when
+                    # budget is tight (late rounds), less when budget is ample (early rounds).
+                    _num_rounds = int(config.get("num_rounds", self.run_config.get("num-server-rounds", 100)))
+                    _base_eps = float(config.get("target_epsilon", 3.0)) / max(_num_rounds, 1)
+                    _round_noise_factor = float(np.clip(_base_eps / max(epsilon_t, 1e-6), 0.5, 2.0))
+                    for k in noise_mults:
+                        noise_mults[k] *= _round_noise_factor
 
                 if fine_tuning_active and not ablation_mode:
                     for k in noise_mults:
@@ -175,7 +205,7 @@ class QPrivIoTClient(NumPyClient):
 
                 dp_was_applied = True
                 dp_mode = "Adaptive" if not ablation_mode else f"Ablation-{ablation_mode}"
-                print(f"CLIENT {self.partition_id}: AdaPriv mode={ablation_mode or 'full'} (ε_t={epsilon_t:.3f}, R_i={self.res_score:.2f})")
+                _log(f"CLIENT {self.partition_id}: AdaPriv mode={ablation_mode or 'full'} (ε_t={epsilon_t:.3f}, R_i={self.res_score:.2f})")
 
             elif use_dp:
                 # Fixed DP: Use the pre-calibrated sigma from server if available
@@ -195,7 +225,7 @@ class QPrivIoTClient(NumPyClient):
                 clip_norms_map = {name: fixed_clip_norm for name in param_keys}
                 dp_was_applied = True
                 dp_mode = "Fixed"
-                print(f"CLIENT {self.partition_id}: Fixed DP (Noise={fixed_noise_multiplier:.3f}, Clip={fixed_clip_norm:.2f})")
+                _log(f"CLIENT {self.partition_id}: Fixed DP (Noise={fixed_noise_multiplier:.3f}, Clip={fixed_clip_norm:.2f})")
 
             else:
                 dp_mode = "None"
@@ -206,7 +236,7 @@ class QPrivIoTClient(NumPyClient):
                 clip_norms_map = {name: fixed_clip_norm for name in param_keys}
                 # Initialize empty noise multipliers for consistency
                 noise_mults = {name: 0.0 for name in param_keys}
-                print(f"CLIENT {self.partition_id}: Baseline Mode (No DP)")
+                _log(f"CLIENT {self.partition_id}: Baseline Mode (No DP)")
             
             # Record performance metrics for telemetry
             avg_clip_norm_configured = float(np.mean(list(clip_norms_map.values()))) if clip_norms_map else 0.0
@@ -274,7 +304,7 @@ class QPrivIoTClient(NumPyClient):
             if use_secagg:
                 secagg_quantization_bound = float(config.get("secagg_quantization_bound", 10.0))
                 metrics["secagg_quantization_bound"] = secagg_quantization_bound
-                print(f"CLIENT {self.partition_id}: Applying SecAgg (Quantization bound: {secagg_quantization_bound})")
+                _log(f"CLIENT {self.partition_id}: Applying SecAgg (Quantization bound: {secagg_quantization_bound})")
 
                 secagg_seed = int(config.get("secagg_seed", 0))
                 secagg_client_index = int(config.get("secagg_client_index", 0))
@@ -298,7 +328,7 @@ class QPrivIoTClient(NumPyClient):
             return updated_deltas, len(train_loader.dataset), metrics
 
         except Exception as e:
-            print(f"CLIENT EXCEPTION in partition {self.partition_id}: {e}")
+            _log(f"CLIENT EXCEPTION in partition {self.partition_id}: {e}")
             traceback.print_exc()
             raise e
 
@@ -319,7 +349,7 @@ class QPrivIoTClient(NumPyClient):
 
             return float(loss), len(val_loader.dataset), {"accuracy": float(accuracy)}
         except Exception as e:
-            print(f"CLIENT EVAL EXCEPTION: {e}")
+            _log(f"CLIENT EVAL EXCEPTION: {e}")
             raise e
 
     def _set_parameters(self, model, parameters, device):
