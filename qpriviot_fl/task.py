@@ -6,7 +6,6 @@ from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner
 from torchvision.transforms import Compose, Normalize, ToTensor
 import numpy as np
-from datasets import load_dataset
 
 
 class Net(nn.Module):
@@ -119,6 +118,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
     if cache_key not in _fds_cache:
         if alpha > 100:  # Use IID if alpha is very high
             partitioner = IidPartitioner(num_partitions=num_partitions)
+            test_partitioner = IidPartitioner(num_partitions=num_partitions)
         else:
             partitioner = DirichletPartitioner(
                 num_partitions=num_partitions,
@@ -127,12 +127,27 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
                 seed=seed,
                 min_partition_size=10
             )
-        fds = FederatedDataset(dataset=hub_dataset_name, partitioners={"train": partitioner})
+            # Partition the TEST split with the same Dirichlet scheme + seed so each
+            # client's local test set carries the SAME label skew as its train set.
+            # This is what makes per-client accuracy heterogeneous (data-poor / skewed
+            # clients score lower) — a prerequisite for measuring per-device fairness.
+            # A shared global test set gives every client identical accuracy (std=0).
+            test_partitioner = DirichletPartitioner(
+                num_partitions=num_partitions,
+                partition_by="label",
+                alpha=alpha,
+                seed=seed,
+                min_partition_size=5
+            )
+        fds = FederatedDataset(
+            dataset=hub_dataset_name,
+            partitioners={"train": partitioner, "test": test_partitioner},
+        )
         _fds_cache[cache_key] = fds
     else:
         fds = _fds_cache[cache_key]
 
-    val_set = load_dataset(hub_dataset_name, split="test")
+    val_set = fds.load_partition(partition_id, "test")
 
     if dataset_name in ("femnist", "mnist", "fashion_mnist"):
         transforms = Compose([ToTensor(), Normalize((0.5,), (0.5,))])
