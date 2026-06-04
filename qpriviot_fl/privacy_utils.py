@@ -257,32 +257,40 @@ def allocate_adaptive_noise(
         # Default if no sensitivity data yet - return empty dicts and base_sigma
         return {}, {}, base_sigma
 
+    # ── Budget-conserving per-layer noise allocation ────────────────────────
+    # Earlier designs scaled noise by clip(s_j, 0.5, 1.0) — i.e. they could only
+    # *reduce* a layer's noise, never raise it. That lowers the layer-mean noise
+    # multiplier below base_sigma, which the server's RDP accountant charges as a
+    # larger ε (observed: param-only spent 9.56 vs fixed-dp's 9.16 at ε=8). The
+    # comparison was therefore NOT iso-privacy: param-only quietly ran at a looser
+    # budget and still failed to beat fixed-dp on accuracy.
+    #
+    # Fix: redistribute a FIXED noise budget across layers instead of spending
+    # more of it. We allow factors in [0.5, 1.5] (both directions) and renormalize
+    # so the unweighted layer-mean factor is exactly 1.0 — which is precisely the
+    # statistic the accountant measures (mean over layers, min over clients). Net
+    # effect: the accounted noise multiplier equals base_sigma exactly, so
+    # param-only and fixed-dp spend identical ε. The adaptivity is now a pure
+    # *reallocation*: stable/dominant layers (low s_j, e.g. fc1 with 94% of params)
+    # shed noise onto volatile small layers (high s_j) at no privacy cost.
+    clip_lo, clip_hi = 0.5, 1.5
+    raw_factors = {}
+    for layer_name, s_j in sensitivities.items():
+        if not (0 < s_j < float('inf')):
+            s_j = 1.0  # neutral fallback
+        # High sensitivity → more noise; low sensitivity → less. (Same direction
+        # as before, wider band so the budget can be conserved by renormalizing.)
+        raw_factors[layer_name] = float(np.clip(s_j, clip_lo, clip_hi))
+
+    mean_factor = float(np.mean(list(raw_factors.values()))) if raw_factors else 1.0
+    if mean_factor <= 0:
+        mean_factor = 1.0
+
     noise_multipliers = {}
     clipping_norms = {}
-
-    for layer_name, s_j in sensitivities.items():
-        # Ensure s_j is valid (positive and finite)
-        if not (0 < s_j < float('inf')):
-            s_j = 1.0  # Fallback to neutral sensitivity
-
-        # Scale ONLY the noise multiplier by sensitivity; keep clip constant.
-        # With sigma_j × clip_j = constant (old design), the per-parameter noise
-        # std = sigma_j × clip_j / sqrt(N) was identical for all layers regardless
-        # of s_j — only the clip threshold changed. Since gradient norms at typical
-        # DP noise levels (σ≈7–15) are always below all clip thresholds, the tighter
-        # clip for high-s layers reduced their gradient signal without any compensating
-        # benefit, making param-only identical to or worse than fixed-dp in practice.
-        #
-        # With constant clip, low-sensitivity layers get genuinely less noise per
-        # parameter (σ_j × C_base / √N), which directly improves their SNR. This
-        # correctly implements the per-layer budget allocation claimed in the paper.
-        # Upper-bound at 1.0: no layer ever gets MORE noise than fixed-dp.
-        # Only low-sensitivity layers (stable gradients, e.g. fc1 with 94 % of
-        # params) benefit from the reduction to 0.5×. The old 2.0 cap was
-        # over-penalizing the output layer (fc2) and conv layers, whose small
-        # gradient updates are completely overwhelmed by 2× noise.
-        s_j_bounded = np.clip(s_j, 0.5, 1.0)
-        noise_multipliers[layer_name] = base_sigma * s_j_bounded
+    for layer_name, f_j in raw_factors.items():
+        # Renormalize so mean(noise_multipliers) == base_sigma → iso-privacy.
+        noise_multipliers[layer_name] = base_sigma * (f_j / mean_factor)
         clipping_norms[layer_name] = base_clip_norm  # constant clip for all layers
 
     return noise_multipliers, clipping_norms, base_sigma

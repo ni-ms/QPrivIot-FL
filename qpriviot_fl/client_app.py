@@ -130,7 +130,12 @@ class QPrivIoTClient(NumPyClient):
                         base_sigma=opacus_sigma if opacus_sigma > 0 else None,
                     )
                     avg_resource_score = float(config.get("avg_resource_score", 0.3))
-                    sigma_i_factor = float(np.clip(avg_resource_score / (self.res_score + 1e-8), 1.0, 1.5))
+                    # Fairness direction (flipped): low-resource clients get LESS noise
+                    # so their gradient SNR improves and their accuracy catches up to
+                    # well-resourced peers. The ratio res_i/avg has cohort-mean ≈ 1.0,
+                    # so the *average* noise budget is conserved; weak clients dip below
+                    # base, strong clients rise above it.
+                    sigma_i_factor = float(np.clip(self.res_score / (avg_resource_score + 1e-8), 0.7, 1.3))
                     noise_mults = {k: base_sigma * sigma_i_factor for k in param_keys}
                     clip_norms_map = {k: base_clip_norm_res for k in param_keys}
 
@@ -188,7 +193,10 @@ class QPrivIoTClient(NumPyClient):
                     # Uses relative scaling (avg/res_i) instead of absolute 1/res_i to avoid
                     # constant saturation when every client has a low absolute res_score.
                     avg_resource_score = float(config.get("avg_resource_score", 0.3))
-                    sigma_i_factor = float(np.clip(avg_resource_score / (self.res_score + 1e-8), 1.0, 1.5))
+                    # Fairness direction (flipped — see device-only branch): low-resource
+                    # clients get LESS noise (factor<1), high-resource clients absorb MORE.
+                    # Cohort-mean of res_i/avg ≈ 1.0 keeps the average noise budget conserved.
+                    sigma_i_factor = float(np.clip(self.res_score / (avg_resource_score + 1e-8), 0.7, 1.3))
                     for k in noise_mults:
                         noise_mults[k] *= sigma_i_factor
                     # Round schedule: cosine-annealed epsilon_t drives noise — more noise when
