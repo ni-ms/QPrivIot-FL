@@ -15,6 +15,7 @@ from qpriviot_fl.task import load_data, make_model, train, test
 from qpriviot_fl.privacy_utils import (
     allocate_adaptive_noise,
     apply_dp_noise_per_layer,
+    apply_distributed_skellam_noise,
     quantize,
     generate_zero_sum_masks
 )
@@ -53,6 +54,10 @@ class QPrivIoTClient(NumPyClient):
             use_secagg = bool(config.get("use_secagg", False))
             use_dp = bool(config.get("use_dp", False))
             use_adaptive_dp = bool(config.get("use_adaptive_dp", False))
+            # Fix A: distributed Skellam DP under SecAgg. "" = legacy continuous-noise path;
+            # "local" = full-σ per-client Skellam (local DP); "distributed" = σ/√N share (needs SecAgg).
+            secagg_dp_mode = str(config.get("secagg_dp_mode", ""))
+            skellam_path = use_secagg and secagg_dp_mode in ("local", "distributed")
 
             base_latency = float(getattr(CONFIG.resource, "base_latency_seconds", 0.2)) / max(self.res_score, 0.01)
             time.sleep(min(base_latency, 0.5))
@@ -273,7 +278,10 @@ class QPrivIoTClient(NumPyClient):
                             delta = param.data - initial_weights_list[idx_param]
                             observed_gradient_norms.append(torch.norm(delta).item())
                 
-                apply_dp_noise_per_layer(model, initial_weights_list, noise_mults, clip_norms_map, num_samples=num_samples)
+                # In the Skellam SecAgg path, clip ONLY here — discrete integer-domain
+                # noise is added after quantization (see SecAgg block below).
+                apply_dp_noise_per_layer(model, initial_weights_list, noise_mults, clip_norms_map,
+                                         num_samples=num_samples, add_noise=not skellam_path)
 
             actual_avg_clip_norm = float(np.mean(observed_gradient_norms)) if observed_gradient_norms else avg_clip_norm_configured
 
@@ -319,6 +327,27 @@ class QPrivIoTClient(NumPyClient):
                 secagg_total_clients = int(config.get("secagg_total_clients", 1))
 
                 quantized_deltas = quantize(updated_deltas, clip_range=secagg_quantization_bound, range_max=1000000)
+
+                # Fix A: distributed Skellam DP in the integer domain (after quantize, before masking).
+                if skellam_path:
+                    sigma_central = float(config.get("sigma", 0.0))
+                    if sigma_central <= 0:
+                        sigma_central = float(np.mean(list(noise_mults.values()))) if noise_mults else 0.0
+                    # Per-client noise seed (distinct from the mask seed); seeded for reproducible
+                    # simulation — a real deployment would draw fresh entropy per client.
+                    noise_seed = (int(secagg_seed) * 1000003 + int(secagg_client_index) * 31 + 17) & 0x7FFFFFFF
+                    quantized_deltas = apply_distributed_skellam_noise(
+                        quantized_deltas,
+                        sigma=sigma_central,
+                        clip_norm=base_clip_norm_res,
+                        num_clients=max(secagg_total_clients, 1),
+                        quantization_bound=secagg_quantization_bound,
+                        range_max=1000000,
+                        distributed=(secagg_dp_mode == "distributed"),
+                        seed=noise_seed,
+                    )
+                    _log(f"CLIENT {self.partition_id}: SecAgg Skellam DP mode={secagg_dp_mode} "
+                         f"(σ={sigma_central:.3f}, N={secagg_total_clients})")
 
                 shapes = [q.shape for q in quantized_deltas]
 

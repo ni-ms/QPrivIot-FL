@@ -301,15 +301,20 @@ def apply_dp_noise_per_layer(
         initial_weights: List[torch.Tensor],
         noise_multipliers: Dict[str, float],
         clipping_norms: Dict[str, float],
-        num_samples: int = 1
+        num_samples: int = 1,
+        add_noise: bool = True,
 ) -> float:
     """
     Apply DP-SGD: gradient clipping + Gaussian noise per layer.
-    
+
     References: AdaPriv Section 3.5
     Algorithm:
     1. Clip gradient: g̃ = g / max(1, ||g||₂ / C)
     2. Add noise: g̃' = g̃ + N(0, (σC / √n)²)
+
+    add_noise=False performs clipping ONLY (no continuous noise). Used by the
+    distributed-Skellam SecAgg path, which injects discrete integer-domain noise
+    *after* quantization instead (see apply_distributed_skellam_noise).
     """
     with torch.no_grad():
         for i, (name, param) in enumerate(model.named_parameters()):
@@ -325,13 +330,79 @@ def apply_dp_noise_per_layer(
             clip_factor = min(1.0, clip_norm / (norm + 1e-8))
             delta_clipped = delta * clip_factor
 
-            # Scale noise by sqrt(num_samples) as per Section 3.5
-            noise_std = (sigma * clip_norm) / math.sqrt(max(num_samples, 1))
-            noise = torch.randn_like(delta) * noise_std
-
-            param.data = initial_weights[i] + delta_clipped + noise
+            if add_noise:
+                # Client-level DP: the sensitivity is the clipped CLIENT DELTA (norm C),
+                # so the calibrated noise is N(0, (σ·C)²) on the delta directly. The former
+                # `/√num_samples` factor (≈√6000≈77×) silently deflated σ to ~no-DP — it
+                # conflated per-example DP-SGD averaging with client-level update perturbation
+                # and made every legacy fixed-dp result non-private (see PAPER_STATUS FINDING 2).
+                noise_std = sigma * clip_norm
+                noise = torch.randn_like(delta) * noise_std
+                param.data = initial_weights[i] + delta_clipped + noise
+            else:
+                param.data = initial_weights[i] + delta_clipped
 
     return 0.0
+
+
+def skellam_noise(shape: Tuple, variance: float, rng: np.random.Generator) -> np.ndarray:
+    """
+    Symmetric Skellam noise: Poisson(μ) − Poisson(μ), with variance = 2μ.
+
+    Integer-valued and CLOSED UNDER ADDITION (the sum of independent Skellams is
+    itself Skellam), which is exactly the property needed for distributed DP under
+    secure aggregation: N clients each add a share, and the masked integer sum is a
+    single Skellam mechanism with the target aggregate variance.
+
+    Reference: Agarwal et al., "The Skellam Mechanism for Differentially Private
+    Federated Learning" (NeurIPS 2021).
+    """
+    if variance <= 0:
+        return np.zeros(shape, dtype=np.int64)
+    mu = variance / 2.0
+    a = rng.poisson(mu, size=shape).astype(np.int64)
+    b = rng.poisson(mu, size=shape).astype(np.int64)
+    return a - b
+
+
+def apply_distributed_skellam_noise(
+        quantized_deltas: List[np.ndarray],
+        sigma: float,
+        clip_norm: float,
+        num_clients: int,
+        quantization_bound: float,
+        range_max: int,
+        distributed: bool,
+        seed: int,
+) -> List[np.ndarray]:
+    """
+    Add per-client Skellam DP noise in the integer (quantized) domain, before masking.
+
+    The quantizer maps a float in [−B, B] to an integer via scale s = range_max / B,
+    so a per-coordinate float sensitivity·σ of (σ·C) becomes (σ·C·s) in the integer
+    domain. The Gaussian-mechanism-equivalent target is per-coordinate variance
+    (σ·C·s)² on the released quantity.
+
+      • distributed=True  : per-client variance = (σ·C·s)² / N.
+                            SecAgg sums N clients → aggregate variance (σ·C·s)²
+                            (central-DP-equivalent noise on the SUM; mean noise ≈ σC/N).
+                            Requires SecAgg to hide individual contributions.
+      • distributed=False : per-client variance = (σ·C·s)²  ("local DP": every client
+                            is itself σ-DP without any trust assumption; mean noise ≈ σC/√N).
+
+    Both report the same noise multiplier σ to the accountant, so the *claimed* ε is
+    identical — the distributed variant simply achieves it with ~√N less aggregate noise.
+    """
+    rng = np.random.default_rng(seed)
+    scale = range_max / max(quantization_bound, 1e-9)
+    base_var = (sigma * clip_norm * scale) ** 2
+    per_client_var = base_var / max(num_clients, 1) if distributed else base_var
+
+    noised = []
+    for arr in quantized_deltas:
+        noise = skellam_noise(arr.shape, per_client_var, rng)
+        noised.append((arr.astype(np.int64) + noise).astype(np.int64))
+    return noised
 
 
 def compute_adaptive_clipping_norm(
