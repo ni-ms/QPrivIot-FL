@@ -64,6 +64,7 @@ class ProgressivePrivacyStrategy(FedAvg):
                  alpha=0.3,
                  num_clients=10,
                  ablation_mode: str = "",
+                 secagg_dp_mode: str = "",
                  **kwargs):
         super().__init__(**kwargs)
         self.results_file = os.path.abspath(results_file)
@@ -79,6 +80,7 @@ class ProgressivePrivacyStrategy(FedAvg):
         self.alpha = alpha
         self.num_clients = num_clients
         self.ablation_mode = ablation_mode
+        self.secagg_dp_mode = secagg_dp_mode
 
         self.target_delta = 1e-5
 
@@ -232,6 +234,7 @@ class ProgressivePrivacyStrategy(FedAvg):
             config = {
                 "use_secagg": self.use_secagg,
                 "secagg_quantization_bound": secagg_quantization_bound,
+                "secagg_dp_mode": self.secagg_dp_mode,
                 "use_dp": self.use_dp,
                 "use_adaptive_dp": self.use_adaptive_dp,
                 "ablation_mode": self.ablation_mode,
@@ -501,6 +504,7 @@ def server_fn(context: Context):
     use_dp = context.run_config.get("use-dp", False)
     use_adaptive_dp = context.run_config.get("use-adaptive-dp", False)
     ablation_mode = str(context.run_config.get("ablation-mode", ""))
+    secagg_dp_mode = str(context.run_config.get("secagg-dp-mode", ""))
 
     seed = context.run_config.get("seed", 42)
     target_epsilon = context.run_config.get("target-epsilon", 3.0)
@@ -518,6 +522,15 @@ def server_fn(context: Context):
 
     if use_secagg:
         filename_parts.append("secagg")
+    if secagg_dp_mode:
+        filename_parts.append(secagg_dp_mode)
+
+    # Disambiguate scale-sweep runs by client count for ALL configs (no-dp / fixed-dp /
+    # secagg) so non-secagg controls don't overwrite each other across N. Legacy N=10
+    # filenames are left unchanged.
+    n_clients = context.run_config.get("num-clients", 10)
+    if n_clients != 10:
+        filename_parts.append(f"n{n_clients}")
 
     filename_parts.append(f"seed{seed}")
     filename_parts.append(f"eps{target_epsilon}")
@@ -541,6 +554,7 @@ def server_fn(context: Context):
         use_dp=use_dp,
         use_adaptive_dp=use_adaptive_dp,
         ablation_mode=ablation_mode,
+        secagg_dp_mode=secagg_dp_mode,
         dataset=dataset,
         seed=seed,
         alpha=context.run_config.get("dirichlet-alpha", 0.3),
