@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner
-from torchvision.transforms import Compose, Normalize, ToTensor
+from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner, NaturalIdPartitioner
+from torchvision.transforms import Compose, Normalize, ToTensor, Grayscale, Resize
 import numpy as np
 
 
@@ -106,8 +106,41 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, dataset_n
             DataLoader(val_ds, batch_size=batch_size)
 
     if dataset_name == "femnist":
-        hub_dataset_name = "flwrlabs/femnist"
-    elif dataset_name == "mnist":
+        # NATURALLY federated: one partition PER WRITER (NaturalIdPartitioner), so each
+        # client carries realistic, ~constant data (~230 chars) regardless of N. This is
+        # what decouples client-count from data-per-client — the MNIST/Dirichlet confound
+        # that bounds the crossover window's upper edge. We take the first N writers via
+        # partition_id ∈ [0, N) (nested across N: the N=50 set ⊂ N=100 ⊂ N=200). The hub
+        # ships only a "train" split, so each writer's local train/val is a seeded 80/20 cut.
+        cache_key = ("flwrlabs/femnist", "natural-writer", seed)
+        if cache_key not in _fds_cache:
+            partitioner = NaturalIdPartitioner(partition_by="writer_id")
+            _fds_cache[cache_key] = FederatedDataset(
+                dataset="flwrlabs/femnist", partitioners={"train": partitioner})
+        fds = _fds_cache[cache_key]
+
+        writer = fds.load_partition(partition_id, "train")
+        split = writer.train_test_split(test_size=0.2, seed=seed)
+        train_part, val_part = split["train"], split["test"]
+
+        femnist_tf = Compose([Grayscale(num_output_channels=1), Resize((28, 28)),
+                              ToTensor(), Normalize((0.5,), (0.5,))])
+
+        def apply_transforms_femnist(batch):
+            batch["img"] = [femnist_tf(i) for i in batch["image"]]
+            batch["label"] = list(batch["character"])
+            for k in ("image", "character", "writer_id", "hsf_id"):
+                batch.pop(k, None)
+            return batch
+
+        train_loader = DataLoader(train_part.with_transform(apply_transforms_femnist),
+                                  batch_size=batch_size, shuffle=True,
+                                  num_workers=0, pin_memory=False)
+        val_loader = DataLoader(val_part.with_transform(apply_transforms_femnist),
+                                batch_size=batch_size, num_workers=0, pin_memory=False)
+        return train_loader, val_loader
+
+    if dataset_name == "mnist":
         hub_dataset_name = "ylecun/mnist"
     elif dataset_name == "fashion_mnist":
         hub_dataset_name = "zalando-datasets/fashion_mnist"

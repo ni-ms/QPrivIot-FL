@@ -114,12 +114,22 @@ def fig_crossover(data):
     ax.set_xlabel("Number of clients N (full participation)")
     ax.set_ylabel("Peak validation accuracy")
     ax.set_ylim(0, 1.0)
-    ax.set_title(f"{DS.upper()} (ε={EPS}, T=20): private FL has a usable client-count window")
+    # Story differs by dataset: on a fixed-size set (MNIST) clients and data-per-client are
+    # inversely coupled, so distributed collapses again at large N (data starvation) → a WINDOW.
+    # On a naturally-federated set (FEMNIST) clients scale without starving data → MONOTONE
+    # crossover, no upper collapse. Detect from the data: does distributed still climb at max N?
+    dist_ys = [data["distributed"][N][2] for N in NS if N in data["distributed"]]
+    monotone = bool(dist_ys) and dist_ys[-1] >= max(dist_ys) - 1e-9
+    if monotone:
+        ax.set_title(f"{DS.upper()} (ε={EPS}, T=20): private FL needs cross-device scale "
+                     f"(monotone crossover, no upper collapse)")
+        ax.axvspan(NS[len(NS)//2], NS[-1], color="green", alpha=0.06)  # shade the usable high-N region
+    else:
+        ax.set_title(f"{DS.upper()} (ε={EPS}, T=20): private FL has a usable client-count window")
+        ax.axvspan(50, 100, color="green", alpha=0.06)  # shade the usable window
     ax.legend(loc="center left", framealpha=0.92, fontsize=9)
-    # shade the usable window
-    ax.axvspan(50, 100, color="green", alpha=0.06)
     fig.tight_layout()
-    p = FIG_DIR / "crossover_peakacc_vs_N.png"
+    p = FIG_DIR / f"crossover_peakacc_vs_N_{DS}.png"
     fig.savefig(p, bbox_inches="tight"); plt.close(fig)
     print(f"Saved: {p.relative_to(ROOT)}")
 
@@ -153,7 +163,7 @@ def fig_trajectories(data):
     fig.suptitle(f"{DS.upper()} (ε={EPS}): distributed-Skellam learns only in the N≈50–100 window; "
                  f"naive DP never does", y=1.005, fontsize=12)
     fig.tight_layout()
-    p = FIG_DIR / "crossover_trajectories.png"
+    p = FIG_DIR / f"crossover_trajectories_{DS}.png"
     fig.savefig(p, bbox_inches="tight"); plt.close(fig)
     print(f"Saved: {p.relative_to(ROOT)}")
 
@@ -174,7 +184,7 @@ def fig_dp_cost(data):
     ax.set_ylabel("DP cost: (no-dp ceiling − distributed)  [pp]")
     ax.set_title(f"{DS.upper()} (ε={EPS}): DP cost of Fix A is minimized at N≈100")
     fig.tight_layout()
-    p = FIG_DIR / "crossover_dp_cost.png"
+    p = FIG_DIR / f"crossover_dp_cost_{DS}.png"
     fig.savefig(p, bbox_inches="tight"); plt.close(fig)
     print(f"Saved: {p.relative_to(ROOT)}")
 
