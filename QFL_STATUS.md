@@ -1,4 +1,5 @@
-# QFL Scale-Up — Working Status (paused 2026-06-24)
+/ol# QFL Scale-Up — Working Status (paused 2026-06-24)
+
 
 Status snapshot for the **DP + Quantum FL** direction (Direction A: "the private-FL
 client-count crossover is governed by model dimension d"). All background jobs are STOPPED.
@@ -24,21 +25,48 @@ calibrates σ with the SAME Opacus call the server uses. Two phases done; phase 
   monotonically: d=275→0pp, 1091→2.2, 4355→4.4, 17411→6.7, 69635→7.4pp; anchors VQC d=48→0pp,
   CNN d=262k→84pp.
 
-### IN PROGRESS — Option 3: clean 5-class contrast (interrupted)
-Goal: a task where the VQC genuinely learns (~70-85%) so "usable-private VQC where CNN collapses"
-becomes an ABSOLUTE claim, killing the "VQC too small to be useful" reviewer critique.
+### DONE 2026-07-01 — Option 3: clean 5-class contrast (ε=8) COMPLETE, result NUANCED/NEGATIVE
+Goal was: a task where the VQC genuinely learns (~70-85%) so "usable-private VQC where CNN
+collapses" becomes an ABSOLUTE claim. **The VQC ceiling goal was met (73.2%) but the absolute
+claim FAILED.** Both sweeps ran to completion (CNN lr=0.01 fix worked — no-dp 98.8-99.5%).
 
-- **VQC 5-class (classes 0-4) — PARTIAL, looking GOOD.** `qfl_mnist_5class_eps8.0.json` has only
-  no-dp N=10 (**73.2%**) and N=50 (63.4%) before it was stopped. The ~73% ceiling (vs ~45% at
-  10-class) is the whole point — Option 3 is delivering. Still need: no-dp N=100/200,
-  distributed N={10,50,100,200} (the headline cells), local N={all}.
-- **CNN 5-class — NOT YET VALID.** First attempt (lr=0.05, `cnn5.log`) was BUGGY: no-dp diverged
-  to 20% (random) because unclipped Adam deltas explode in plain FedAvg, while the clipped
-  distributed path partially learned (36-48%) — i.e. no-dp < distributed, which is impossible and
-  flagged the bug. **Fix identified: lr 0.05 → 0.01** (matches the project's own past fix; see
-  `FINDINGS`/memory bug #7). The relaunch (lr=0.01, le=3) was killed during data-load before
-  producing any cell. **`qfl_cnn_5class_eps8.0.json` currently holds the STALE BUGGED lr=0.05
-  data — overwrite it on rerun.**
+Full 5-class ε=8 numbers (`qfl_mnist_5class_eps8.0.json`, `qfl_cnn_5class_eps8.0.json`,
+fig `figures/qfl_crossover_vs_N_5class_eps8.png`):
+
+| N   | VQC no-dp | VQC priv | VQC DPcost | CNN no-dp | CNN priv | CNN DPcost |
+|-----|-----------|----------|------------|-----------|----------|------------|
+| 10  | 73.2      | 36.6     | **36.6**   | 99.5      | 40.5     | **59.0**   |
+| 50  | 63.4      | 44.0     | 19.4       | 99.5      | 80.8     | 18.7       |
+| 100 | 63.8      | 52.3     | 11.5       | 99.1      | 91.3     | 7.8        |
+| 200 | 55.5      | 46.2     | 9.3        | 98.8      | 92.0     | 6.8        |
+
+**What holds:** at N=10 the large-d CNN pays a much bigger DP penalty (59pp) than the tiny-d VQC
+(36.6pp) — consistent with the d-sweep mechanism (DP cost grows with d, worst at small N).
+**What FAILED:** (1) absolute private accuracy — CNN ≥ VQC at EVERY N (40.5 vs 36.6 at N=10;
+80.8 vs 44 at N=50…), so the VQC is NEVER the better private model; the CNN does NOT collapse to
+random even at N=10. (2) The VQC DP-cost advantage exists ONLY at N=10 and is modest; at N≥50 the
+CNN's DP cost is actually LOWER. → "usable-private VQC where CNN collapses" is not supportable at
+ε=8. The publishable core reverts to the MECHANISM (d-sweep + this contrast as the extreme-d
+demo), NOT a "quantum is better for privacy" claim.
+
+### DONE 2026-07-01 — ε=3 rescue test: FAILED (absolute VQC-win does NOT exist)
+`qfl_{cnn,mnist}_5class_eps3.0.json` (σ: VQC 8.18, CNN 7.48). CNN still wins private acc at EVERY N:
+
+| N   | VQC priv | VQC DPcost | CNN priv | CNN DPcost | priv winner |
+|-----|----------|------------|----------|------------|-------------|
+| 10  | 27.6     | 45.7       | 32.0     | 67.5       | CNN +4.4pp  |
+| 50  | 34.1     | 29.3       | 63.9     | 35.5       | CNN +29.8   |
+| 100 | 51.7     | 12.1       | 62.5     | 36.6       | CNN +10.7   |
+| 200 | 45.4     | 10.1       | 88.2     | 10.6       | CNN +42.8   |
+
+Tighter privacy grew BOTH DP costs but did NOT flip the ordering — CNN edges VQC even at N=10.
+**CONCLUSION: the "usable-private VQC beats CNN" absolute claim is dead at both ε=8 and ε=3.**
+What survives ROBUSTLY across all 4 conditions (10cls-ε8, 5cls-ε8, 5cls-ε3): at N=10 the tiny-d
+VQC's DP COST is smaller than the large-d CNN's (37/37/46pp vs 84/59/68pp). → publishable core =
+the MECHANISM: DP cost is governed by d, worst at small N. d-sweep (controlled) + VQC↔CNN contrast
+(extreme-d, ε-robust) are the two evidence panels. Frame as characterization, NOT "quantum helps".
+
+### NEXT: awaiting user steer (rescue is exhausted → realistically: write the mechanism paper)
 
 ---
 
