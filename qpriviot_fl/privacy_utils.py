@@ -365,6 +365,66 @@ def skellam_noise(shape: Tuple, variance: float, rng: np.random.Generator) -> np
     return a - b
 
 
+def skellam_rdp_epsilon(
+        sigma: float,
+        clip_norm: float,
+        scale: float,
+        dim: int,
+        target_delta: float = 1e-5,
+        releases: int = 1,
+        l1_sensitivity: Optional[float] = None,
+        orders: Optional[List[int]] = None,
+) -> Tuple[float, float]:
+    """Exact (ε, δ)-DP for the (distributed) Skellam mechanism via RDP.
+
+    Agarwal, Kairouz & Liu, "The Skellam Mechanism for Differentially Private
+    Federated Learning" (NeurIPS 2021), Theorem 3.5. In their parametrisation μ is the
+    PER-COORDINATE VARIANCE of the released Skellam noise (each of the two Poissons has
+    mean μ/2, so Var = μ; PMF e^{-μ}I_k(μ); E‖noise‖² = d·μ). For integer α > 1 and
+    integer ℓ2 sensitivity Δ2 (with ℓ1 sensitivity Δ1):
+
+        ε_RDP(α) ≤ α·Δ2²/(2μ) + min{ ((2α−1)·Δ2² + 6·Δ1)/(4μ²),  3·Δ1/(2μ) }
+
+    The leading term equals the Gaussian mechanism's α·Δ2²/(2μ); the min{…} is the
+    discretisation surcharge, which vanishes as μ (≈ resolution²) grows — the bound is at
+    most a (1+O(1/μ)) factor worse than Gaussian.
+
+    Mapping from this project's mechanism (distributed Skellam under SecAgg):
+        μ  = aggregate per-coordinate variance = (sigma · clip_norm · scale)²
+             (per-client variance (σ·C·s)²/N summed over N clients under SecAgg)
+        Δ2 = integer ℓ2 sensitivity of one user's clipped, quantised update = clip_norm · scale
+        Δ1 = integer ℓ1 sensitivity ≤ √dim · Δ2   (worst case; pass a tighter value if known)
+        scale = range_max / quantization_bound
+
+    `releases` composes that many identical Skellam releases additively in RDP (e.g. a
+    separately-noised sum-vector and count vector) before the (ε, δ) conversion.
+
+    Returns (epsilon, best_order).
+    """
+    if sigma <= 0:
+        return float("inf"), 0.0
+    if orders is None:
+        orders = list(range(2, 257))
+
+    mu = (sigma * clip_norm * scale) ** 2
+    delta2 = clip_norm * scale
+    delta1 = l1_sensitivity if l1_sensitivity is not None else math.sqrt(dim) * delta2
+    d2sq = delta2 * delta2
+
+    best_eps = float("inf")
+    best_alpha = 0.0
+    for alpha in orders:
+        rdp_lead = alpha * d2sq / (2.0 * mu)
+        corr = min(((2 * alpha - 1) * d2sq + 6 * delta1) / (4 * mu * mu),
+                   3 * delta1 / (2 * mu))
+        rdp = releases * (rdp_lead + corr)
+        eps = rdp + math.log(1.0 / target_delta) / (alpha - 1)
+        if eps < best_eps:
+            best_eps = eps
+            best_alpha = float(alpha)
+    return best_eps, best_alpha
+
+
 def apply_distributed_skellam_noise(
         quantized_deltas: List[np.ndarray],
         sigma: float,
