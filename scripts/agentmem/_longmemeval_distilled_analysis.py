@@ -23,12 +23,12 @@ from sklearn.preprocessing import normalize
 from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _longmemeval_data import get_embeddings as get_raw_embeddings  # noqa: E402
 from _agentmem_probe import assign_buckets, clip_rows_to_norm, single_shot_sigma  # noqa: E402
 from _agentmem_leakage import mia_auc, extraction_gap, build_dp_centroids  # noqa: E402
 
-_CACHE_DIR = Path(__file__).resolve().parents[1] / "experiment_results"
+_CACHE_DIR = Path(__file__).resolve().parents[2] / "experiment_results"
 
 
 def embed_distilled(distilled_path):

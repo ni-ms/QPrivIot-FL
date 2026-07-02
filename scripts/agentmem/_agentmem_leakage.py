@@ -44,7 +44,7 @@ import numpy as np
 from sklearn.preprocessing import normalize
 from sklearn.metrics import roc_auc_score
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _agentmem_probe import (  # noqa: E402
     build_embeddings,
     dirichlet_partition,

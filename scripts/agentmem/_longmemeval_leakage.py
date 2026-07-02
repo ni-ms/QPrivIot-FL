@@ -26,7 +26,7 @@ from sklearn.preprocessing import normalize
 from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _longmemeval_data import get_embeddings  # noqa: E402
 from _agentmem_probe import (  # noqa: E402
     assign_buckets,

@@ -42,9 +42,11 @@ packages = ["."]
 publisher = "nikms"
 
 # Point to your ServerApp and ClientApp objects
-[tool.flwr.app.components]
-serverapp = "qpriviot_fl.server_app:app"
-clientapp = "qpriviot_fl.client_app:app"
+# NOTE: the Flower FL app was archived to scripts/archive/flower_app/ (project pivoted to
+# agent-memory). Restore those modules into qpriviot_fl/ and uncomment to `flwr run` again.
+# [tool.flwr.app.components]
+# serverapp = "qpriviot_fl.server_app:app"
+# clientapp = "qpriviot_fl.client_app:app"
 
 # Custom config values accessible via `context.run_config`
 [tool.flwr.app.config]

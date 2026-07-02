@@ -3,11 +3,12 @@
 # Expands the paper's 2-seed (0,1) tables to 5 seeds (0-4). All configs run on cached
 # embeddings (no GPU needed). Idempotent: skips a config whose JSON already exists.
 #
-#   bash scripts/rerun_grid.sh            # full grid, seeds 0,1,2,3,4
-#   SEEDS=0,1,2,3,4,5,6,7 bash scripts/rerun_grid.sh
+#   bash scripts/shell/rerun_grid.sh            # full grid, seeds 0,1,2,3,4
+#   SEEDS=0,1,2,3,4,5,6,7 bash scripts/shell/rerun_grid.sh
 set -uo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"   # scripts/shell/ -> repo root
 PY=.venv/bin/python
+AGENTMEM=scripts/agentmem
 SEEDS=${SEEDS:-0,1,2,3,4}
 OUT=experiment_results/rerun_grid
 mkdir -p "$OUT" logs
@@ -18,7 +19,7 @@ run() {  # run <tag> <script> <args...>
   local json="$OUT/${tag}.json"
   if [[ -f "$json" ]]; then log "SKIP  $tag (exists)"; return 0; fi
   log "RUN   $tag"
-  if $PY "scripts/${script}" "$@" --seeds "$SEEDS" --json "$json" > "logs/${tag}.log" 2>&1; then
+  if $PY "${AGENTMEM}/${script}" "$@" --seeds "$SEEDS" --json "$json" > "logs/${tag}.log" 2>&1; then
     log "OK    $tag"
   else
     log "FAIL  $tag (see logs/${tag}.log)"
