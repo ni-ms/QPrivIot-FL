@@ -16,6 +16,7 @@ Usage:
   .venv/bin/python scripts/_longmemeval_leakage.py --K 1024 --d 32 --eps 16,8,3,1 --seeds 0,1
 """
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -129,6 +130,27 @@ def run(args):
     print(f"\nclean AUC(all)={ms(metrics['inf (clean)']['auc'])[0]:.3f}, "
           f"clean tail-AUC={ms(metrics['inf (clean)']['lc_auc'])[0]:.3f}; ideal=0.500.")
 
+    if args.json:
+        rows = []
+        for lab, sigma in sigma_specs:
+            a_m, a_s = ms(metrics[lab]["auc"])
+            l_m, l_s = ms(metrics[lab]["lc_auc"])
+            g_m, g_s = ms(metrics[lab]["gap"])
+            rows.append({"label": lab, "sigma": sigma,
+                         "auc_mean": a_m, "auc_std": a_s,
+                         "lc_auc_mean": l_m, "lc_auc_std": l_s,
+                         "gap_mean": g_m, "gap_std": g_s,
+                         "auc_per_seed": [float(x) for x in metrics[lab]["auc"]],
+                         "lc_auc_per_seed": [float(x) for x in metrics[lab]["lc_auc"]]})
+        out = {"script": "longmemeval_leakage", "metric": "MIA-AUC / tail-AUC / extract-gap",
+               "seeds": seeds, "lc_frac": float(np.mean(lc_fracs)),
+               "config": {"variant": args.variant, "K": args.K, "d": args.d,
+                          "M": args.M, "lowcount": args.lowcount, "eps": args.eps},
+               "corpus": {"users": int(N), "notes": int(len(note_emb))}, "rows": rows}
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        json.dump(out, open(args.json, "w"), indent=2)
+        print(f"[json] wrote {args.json}")
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -140,4 +162,5 @@ if __name__ == "__main__":
     p.add_argument("--eps", type=str, default="16,8,3,1")
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--seeds", type=str, default="0,1")
+    p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
     run(p.parse_args())

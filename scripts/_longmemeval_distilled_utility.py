@@ -113,6 +113,21 @@ def run(args):
         print(f"{lab:<14}{sigma:>8.3f}{np.mean(xs):>14.3f} +/-{(np.std(xs) if len(xs)>1 else 0):<5.2f}")
     print(f"\nchance~={args.topk/args.K:.3f}. Does clean >> chance and DP hold up?")
 
+    if args.json:
+        rows = [{"label": lab, "sigma": sigma,
+                 "mean": float(np.mean(metrics[lab])),
+                 "std": float(np.std(metrics[lab])) if len(metrics[lab]) > 1 else 0.0,
+                 "per_seed": [float(x) for x in metrics[lab]]}
+                for lab, sigma in sigma_specs]
+        out = {"script": "distilled_utility", "metric": f"answer-recall@{args.topk}",
+               "chance": args.topk / args.K, "seeds": seeds,
+               "config": {"variant": "oracle", "distilled": Path(args.distilled).stem,
+                          "K": args.K, "d": args.d, "topk": args.topk},
+               "stats": {"N": int(N), "notes": int(len(note_raw))}, "rows": rows}
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        json.dump(out, open(args.json, "w"), indent=2)
+        print(f"[json] wrote {args.json}")
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -123,4 +138,5 @@ if __name__ == "__main__":
     p.add_argument("--eps", type=str, default="16,8,3")
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--seeds", type=str, default="0,1")
+    p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
     run(p.parse_args())
