@@ -150,7 +150,7 @@ def md_summary(data, path):
         lines.append(f"| {tag} | {script} | {cfg['K']} | {cfg['d']} | "
                      f"{100*lc_frac:.0f}% | {ct:.3f} | {e8:.3f} | {e3:.3f} | {ca:.3f} |")
 
-    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    Path(path).write_text("\n".join(lines) + "\n")
 
 
 def main():

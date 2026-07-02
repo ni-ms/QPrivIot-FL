@@ -52,7 +52,6 @@ from qpriviot_fl.privacy_utils import (  # noqa: E402
     quantize,
     dequantize,
     apply_distributed_skellam_noise,
-    dp_quantile_clip,
 )
 
 RANGE_MAX = 1_000_000
@@ -94,21 +93,6 @@ def secagg_skellam_release(per_user_arrays, sigma, clip_norm, quant_bound, num_c
     return dequantize(agg_int, clip_range=quant_bound, range_max=RANGE_MAX)
 
 
-def choose_clip(norms, seed, clip_eps, q=0.95, grid=None):
-    """PUBLIC clip bound C, DP-selected from the per-user payload norms.
-
-    The empirical q-quantile is a function of the private corpus; releasing it as a public
-    mechanism parameter is an unaccounted release. `dp_quantile_clip` selects C from a public
-    grid with the exponential mechanism at cost `clip_eps` (folded into the accountant via
-    `skellam_rdp_epsilon(..., clip_eps=..., clip_releases=1)`). Pass clip_eps=0 to reproduce the
-    superseded, unaccounted empirical p95.
-    """
-    rng = np.random.default_rng((seed * 7 + 991) & 0x7FFFFFFF)
-    if grid is None:
-        from qpriviot_fl.privacy_utils import PUBLIC_CLIP_GRID as grid
-    return float(dp_quantile_clip(norms, q, clip_eps, rng, grid))
-
-
 def clip_rows_to_norm(mat, C):
     """Clip each row of `mat` to L2 norm C (client-level DP sensitivity bound)."""
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
@@ -139,54 +123,11 @@ def _encode_st_raw(model_name="all-MiniLM-L6-v2"):
     return Etr, np.array(tr.target), Ete, np.array(te.target), list(tr.target_names)
 
 
-PUBLIC_PROJ_SEED = 20260709  # a PUBLIC constant: the random projection leaks nothing
-
-
-_PUB_20NG = str(Path(__file__).resolve().parents[2] / "experiment_results" / "_st_20ng_raw.npz")
-_PUB_LME = str(Path(__file__).resolve().parents[2] / "experiment_results" / "_st_lme_oracle.npz")
-
-
-def load_public_raw(which):
-    """Raw 384-d embeddings of a PUBLIC corpus, used to fit a data-independent PCA.
-    Each experiment fits on the corpus its users did NOT contribute: LongMemEval runs fit on
-    20-Newsgroups, and the 20NG-as-users runs fit on LongMemEval."""
-    if which == "20ng":
-        return np.load(_PUB_20NG)["Etr"]
-    if which == "lme":
-        return np.load(_PUB_LME)["note_emb"]
-    raise ValueError(which)
-
-
-def make_projector(raw_fit, d, seed, proj="pca", public="20ng"):
-    """Return a transform X -> R^d.
-
-    proj='pca'      : PCA fit on `raw_fit`. DATA-DEPENDENT — the projection matrix is a
-                      function of the users' private notes, so shipping it to clients is an
-                      unaccounted release (see paper §8).
-    proj='randproj' : Gaussian random projection from a PUBLIC seed. Data-independent, so it
-                      costs exactly zero privacy budget; `raw_fit` is used only for its width.
-    """
-    D = raw_fit.shape[1]
-    if d >= D:
-        return lambda X: X
-    if proj == "pca":
-        return PCA(n_components=d, random_state=seed).fit(raw_fit).transform
-    if proj == "randproj":
-        rng = np.random.default_rng(PUBLIC_PROJ_SEED + seed)
-        R = (rng.standard_normal((D, d)) / np.sqrt(d)).astype(np.float32)
-        return lambda X: np.asarray(X, dtype=np.float32) @ R
-    if proj == "publicpca":
-        pub = load_public_raw(public)
-        assert pub.shape[1] == D, f"public corpus dim {pub.shape[1]} != {D}"
-        return PCA(n_components=d, random_state=seed).fit(pub).transform
-    raise ValueError(f"unknown proj {proj}")
-
-
-def build_embeddings(d, seed, embedder="tfidf", proj="pca"):
+def build_embeddings(d, seed, embedder="tfidf"):
     """Return (Etr, ytr, Ete, yte, topic_names), all embeddings L2-normalized to dim d.
 
     embedder='tfidf' : TF-IDF -> TruncatedSVD(d)  (offline, original Phase-0 path)
-    embedder='st'    : REAL all-MiniLM-L6-v2 (384-d) -> `proj`(d) projection if d<384.
+    embedder='st'    : REAL all-MiniLM-L6-v2 (384-d) -> PCA(d) projection if d<384.
                        Tests whether the findings survive real embedding geometry, and
                        makes the projection dim d an explicit tiny-d design lever.
     """
@@ -203,8 +144,12 @@ def build_embeddings(d, seed, embedder="tfidf", proj="pca"):
 
     if embedder == "st":
         rtr, ytr, rte, yte, names = _encode_st_raw()
-        tf = make_projector(rtr, d, seed, proj, public="lme")
-        Etr, Ete = tf(rtr), tf(rte)
+        if d < rtr.shape[1]:
+            pca = PCA(n_components=d, random_state=seed)
+            Etr = pca.fit_transform(rtr)
+            Ete = pca.transform(rte)
+        else:
+            Etr, Ete = rtr, rte
         return (normalize(Etr).astype(np.float32), ytr,
                 normalize(Ete).astype(np.float32), yte, names)
 
@@ -271,7 +216,7 @@ def run(args):
 
     for seed in seeds:
         rng = np.random.default_rng(seed)
-        Etr, ytr, Ete, yte, topic_names = build_embeddings(args.d, seed, args.embedder, args.proj)
+        Etr, ytr, Ete, yte, topic_names = build_embeddings(args.d, seed, args.embedder)
         n_topics = ytr.max() + 1
 
         # data-independent bucket anchors (fixed given seed; shared across all users)
@@ -301,15 +246,16 @@ def run(args):
         # C_v = 95th pct of per-user ||flattened sum-vector||; C_c likewise for counts.
         v_norms = np.array([np.linalg.norm(v) for v in user_vecs])
         c_norms = np.array([np.linalg.norm(c) for c in user_cnts])
-        C_v = choose_clip(v_norms, seed, args.clip_eps)
-        C_c = choose_clip(c_norms, seed, args.clip_eps)
+        C_v = float(np.percentile(v_norms, 95))
+        C_c = float(np.percentile(c_norms, 95))
         for u in range(args.N):
             fv = user_vecs[u].reshape(1, -1)
             user_vecs[u] = clip_rows_to_norm(fv, C_v).reshape(args.K, args.d)
             user_cnts[u] = clip_rows_to_norm(user_cnts[u].reshape(1, -1), C_c).reshape(args.K)
 
         # quantization bounds cover the observed magnitudes
-        B_v, B_c = C_v, C_c   # public quantiser bound: |coord| <= ||V||_2 <= C, so B := C never clips
+        B_v = max(float(np.max([np.max(np.abs(v)) for v in user_vecs])), 1e-6)
+        B_c = max(float(np.max([np.max(np.abs(c)) for c in user_cnts])), 1e-6)
 
         # ----- clean (noise-free) aggregate -----
         sum_v = np.sum(user_vecs, axis=0)          # (K,d)
@@ -383,7 +329,7 @@ def run(args):
                          "recall_per_seed": [float(x) for x in metrics[lab]["recall"]],
                          "topic_per_seed": [float(x) for x in metrics[lab]["topic_dp"]]})
         out = {"script": "agentmem_probe", "metric": f"topic-acc / recall@{args.k}",
-               "seeds": seeds, "embedder": args.embedder, "proj": args.proj, "clip_eps": args.clip_eps,
+               "seeds": seeds, "embedder": args.embedder,
                "ref": {"raw_knn": rk_m, "clean_centroid": tc_m},
                "config": {"N": args.N, "K": args.K, "d": args.d, "M": args.M,
                           "k": args.k, "alpha": args.alpha, "eps": args.eps}, "rows": rows}
@@ -403,10 +349,6 @@ if __name__ == "__main__":
     p.add_argument("--eps", type=str, default="8,3")
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--embedder", type=str, default="tfidf", choices=["tfidf", "st"])
-    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1,
-                   help="eps spent DP-selecting the clip bound C (0 = leaky empirical p95)")
-    p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
-                   help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--seeds", type=str, default="0,1")
     p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
     run(p.parse_args())

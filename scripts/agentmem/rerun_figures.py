@@ -1,13 +1,13 @@
 """
 Regenerate the paper figures from the multi-seed rerun JSON.
-Writes PNG + PDF to figures/. Read-only over experiment_results/<grid>/*.json.
+Writes PNG + PDF to figures/. Read-only over experiment_results/rerun_grid/*.json.
 
-  .venv/bin/python scripts/agentmem/rerun_figures.py --grid rerun_grid_rp
+  .venv/bin/python scripts/rerun_figures.py
 
 Figures:
-  fig_utility_vs_eps       — LongMemEval oracle evidence-recall@5 vs eps, per K
-  fig_leakage_drop         — MIA tail-AUC vs eps (leakage collapses to chance under DP)
-  fig_projection_ablation  — the d-"crossover" is an artifact of the data-dependent PCA
+  fig_utility_vs_eps  — LongMemEval oracle evidence-recall@5 vs eps, per K (utility holds at tiny-K)
+  fig_leakage_drop    — MIA tail-AUC vs eps (leakage collapses to chance under DP)
+  fig_d_crossover     — real-embedding d-sweep: DP utility-retention AND pre-DP tail-AUC vs d
 """
 import json
 from pathlib import Path
@@ -18,39 +18,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-GRID = ROOT / "experiment_results" / "rerun_grid_rp"   # headline grid; overridden by --grid
+GRID = ROOT / "experiment_results" / "rerun_grid"
 FIG = ROOT / "figures"
 FIG.mkdir(exist_ok=True)
 
 EPS_ORDER = ["inf (clean)", "inf", "eps=16", "eps=8", "eps=3", "eps=1"]
-
-# The run labels ("eps=8") are the EXPLORATION budgets: they name the sigma each arm was run
-# at, via the classic Gaussian bound sigma = sqrt(2 ln(1.25/delta))/eps, which is only valid
-# for eps <= 1. The paper reports the RIGOROUS Skellam-RDP eps for that same sigma (paper 5.4),
-# clip-selection cost included. Plot the axis the paper actually claims, not the label the
-# harness happened to run under -- otherwise every figure contradicts every table.
-#
-#   label     sigma    rigorous eps   (skellam_rdp_epsilon, K=32 d=32, delta=1e-5,
-#   eps=16    0.303          22.13     releases=1 vector-only, clip_eps=0.1)
-#   eps=8     0.606           9.31
-#   eps=3     1.615           3.21
-#   eps=1     4.845           1.13
-EPS_X = {"inf (clean)": 64.0, "inf": 64.0,
-         "eps=16": 22.13, "eps=8": 9.31, "eps=3": 3.21, "eps=1": 1.13}
-
-EPS_TICKS = [1.13, 3.21, 9.31, 22.13, 64.0]
-EPS_TICKLABELS = ["1.1", "3.2", "9.3", "22.1", "clean"]
-EPS_XLABEL = "privacy budget $\\varepsilon$ (Skellam RDP, clip selection included)"
-
-
-def _eps_axis(ax, ticks=None):
-    """Log eps axis labelled with the rigorous Skellam-RDP budgets of paper 5.4."""
-    keep = ticks or EPS_TICKS
-    labels = [EPS_TICKLABELS[EPS_TICKS.index(t)] for t in keep]
-    ax.set_xscale("log")
-    ax.set_xticks(keep)
-    ax.set_xticklabels(labels)
-    ax.set_xlabel(EPS_XLABEL)
+EPS_X = {"inf (clean)": 64.0, "inf": 64.0, "eps=16": 16.0, "eps=8": 8.0, "eps=3": 3.0, "eps=1": 1.0}
 
 
 def _val(rows, label, key):
@@ -63,13 +36,8 @@ def _val(rows, label, key):
     return None
 
 
-def load(grid=None):
-    g = Path(grid) if grid else GRID
-    if not g.is_absolute():
-        g = ROOT / "experiment_results" / g
-    if not g.exists():
-        return {}
-    return {p.stem: json.load(open(p)) for p in sorted(g.glob("*.json"))
+def load():
+    return {p.stem: json.load(open(p)) for p in sorted(GRID.glob("*.json"))
             if not p.stem.endswith("_TABLE")}
 
 
@@ -90,8 +58,9 @@ def fig_utility(data):
         x, y, e = _series(d["rows"], "mean")
         ax.errorbar(x, y, yerr=e, marker="o", capsize=3, label=f"K={K}")
         ax.axhline(d["chance"], color="gray", ls=":", lw=0.6)
-    _eps_axis(ax)
-    ax.set_ylabel("evidence-recall@5")
+    ax.set_xscale("log"); ax.set_xticks([1, 3, 8, 16, 64])
+    ax.set_xticklabels(["1", "3", "8", "16", "clean"])
+    ax.set_xlabel("privacy budget epsilon (Skellam RDP)"); ax.set_ylabel("evidence-recall@5")
     ax.set_title("LongMemEval oracle: DP utility holds at tiny-K")
     ax.legend(title="buckets", fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -108,8 +77,9 @@ def fig_leakage(data):
         x, y, e = _series(d["rows"], "lc_auc_mean")
         ax.errorbar(x, y, yerr=e, marker="s", capsize=3, label=f"K={d['config']['K']}")
     ax.axhline(0.5, color="k", ls="--", lw=0.8, label="chance (no leakage)")
-    _eps_axis(ax)
-    ax.set_ylabel("MIA tail-AUC (low-count)")
+    ax.set_xscale("log"); ax.set_xticks([1, 3, 8, 16, 64])
+    ax.set_xticklabels(["1", "3", "8", "16", "clean"])
+    ax.set_xlabel("privacy budget epsilon (Skellam RDP)"); ax.set_ylabel("MIA tail-AUC (low-count)")
     ax.set_title("LongMemEval oracle: low-count leakage collapses under DP")
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -118,79 +88,38 @@ def fig_leakage(data):
     plt.close(fig)
 
 
-# Categorical slots 1/2/3 of the validated palette (worst adjacent CVD dE 21.6, tritan).
-# Contrast of slots 2-3 vs a light surface is < 3:1, so identity is ALSO carried by
-# distinct markers + direct end-labels, never by hue alone.
-PROJ_STYLE = [
-    ("data-PCA (leaky)", "rerun_grid_abl_pca", "#2a78d6", "o", "-"),
-    ("randproj (free)",  "rerun_grid_rp",      "#1baf7a", "s", "-"),
-    ("publicPCA (free)", "rerun_grid_abl_pp",  "#eda100", "^", "--"),
-]
-
-
-def _st_series(data, key_probe, key_leak):
-    """(ds, private-utility, clean tail-AUC) over the st-embedder d-sweep of one grid."""
-    util = {v["config"]["d"]: v for v in data.values()
-            if v.get("script") == "agentmem_probe" and v.get("embedder") == "st"}
-    leak = {v["config"]["d"]: v for v in data.values()
-            if v.get("script") == "agentmem_leakage" and v.get("embedder") == "st"}
+def fig_crossover(data):
+    """Real sentence-embeddings: as proj-dim d grows, pre-DP tail-AUC rises (more leakage)
+    AND DP utility-retention falls -> tiny-d favored on both axes."""
+    util = {d["config"]["d"]: d for _, d in data.items()
+            if d["script"] == "agentmem_probe" and d["embedder"] == "st"}
+    leak = {d["config"]["d"]: d for _, d in data.items()
+            if d["script"] == "agentmem_leakage" and d["embedder"] == "st"}
     ds = sorted(set(util) & set(leak))
-    priv = [_val(util[d]["rows"], "eps=8", key_probe) for d in ds]
-    tail = [_val(leak[d]["rows"], "inf (clean)", key_leak) for d in ds]
-    return ds, priv, tail
-
-
-def fig_projection_ablation(_unused=None):
-    """The d-'crossover' is an artifact of fitting the projection on user notes.
-
-    Left  : PRIVATE utility vs d. Under data-PCA tiny-d wins; under either
-            data-INDEPENDENT projection d=384 (no projection) wins.
-    Right : pre-DP leakage vs d. Data-PCA shows a rising gradient; the honest
-            projections are saturated. Post-DP, every d sits at chance.
-    Two panels, one measure each -- never a dual axis.
-    """
-    series = []
-    for name, grid, colour, marker, ls in PROJ_STYLE:
-        d = load(grid)
-        if not d:
-            continue
-        ds, priv, tail = _st_series(d, "topic_mean", "lc_auc_mean")
-        if ds:
-            series.append((name, ds, priv, tail, colour, marker, ls))
-    if not series:
-        print("  (skip fig_projection_ablation: no st-embedder configs)")
+    if not ds:
+        print("  (skip fig_d_crossover: no st-embedder configs yet)")
         return
-
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=(9.0, 3.9))
-    # Direct-label at the LEFT end, where the three series are well separated; they
-    # converge by construction at d=384 (identity projection), so labelling there collides.
-    for name, ds, priv, tail, colour, marker, ls in series:
-        for ax, ys in ((axL, priv), (axR, tail)):
-            ax.plot(ds, ys, marker=marker, linestyle=ls, color=colour, lw=2.0,
-                    ms=6.5, mec="white", mew=1.0, label=name, zorder=3)
-    
-    axL.legend(fontsize=7.5, frameon=False)
-
-    for ax in (axL, axR):
-        ax.set_xscale("log", base=2)
-        ax.set_xticks(series[0][1]); ax.set_xticklabels([str(x) for x in series[0][1]])
-        ax.set_xlabel("projection dimension d")
-        ax.grid(alpha=0.25, zorder=0)
-        ax.axvline(384, color="0.6", ls=":", lw=1.2, zorder=1)
-        ax.spines[["top", "right"]].set_visible(False)
-
-    axL.set_ylabel("private utility (topic-acc @ epsilon~9.3)")
-    axL.set_title("(a) tiny-d wins only under the leaky projection", fontsize=9.5)
-    axL.set_xlim(right=520)
-    axL.margins(y=0.14)
-    axR.set_ylabel("pre-DP leakage (clean tail-AUC)")
-    axR.set_title("(b) the leakage gradient is an artifact too", fontsize=9.5)
-    axR.set_ylim(0.48, 1.02)
-    axR.legend(fontsize=7.5, loc="center right", frameon=False)
-
+    ret, tail = [], []
+    for dd in ds:
+        rows = util[dd]["rows"]
+        clean = _val(rows, "inf (clean)", "topic_mean")
+        e8 = _val(rows, "eps=8", "topic_mean")
+        ret.append(100 * e8 / clean if clean else np.nan)
+        tail.append(_val(leak[dd]["rows"], "inf (clean)", "lc_auc_mean"))
+    fig, ax1 = plt.subplots(figsize=(6, 4.2))
+    ax2 = ax1.twinx()
+    l1 = ax1.plot(ds, ret, "o-", color="tab:blue", label="DP utility-retention @ e=8 (%)")
+    l2 = ax2.plot(ds, tail, "s--", color="tab:red", label="pre-DP tail-AUC (leakage)")
+    ax1.set_xlabel("projection dim d"); ax1.set_ylabel("retention @ e=8 (%)", color="tab:blue")
+    ax2.set_ylabel("clean tail-AUC", color="tab:red")
+    ax1.set_xscale("log", base=2); ax1.set_xticks(ds); ax1.set_xticklabels([str(x) for x in ds])
+    ax1.set_title("Real embeddings: tiny-d wins on both axes")
+    lns = l1 + l2
+    ax1.legend(lns, [x.get_label() for x in lns], fontsize=8, loc="center right")
+    ax1.grid(alpha=0.3)
     fig.tight_layout()
     for ext in ("png", "pdf"):
-        fig.savefig(FIG / f"fig_projection_ablation.{ext}", dpi=150)
+        fig.savefig(FIG / f"fig_d_crossover.{ext}", dpi=150)
     plt.close(fig)
 
 
@@ -206,8 +135,8 @@ def fig_distilled_utility(data):
         ax.errorbar(x, y, yerr=e, marker="o", capsize=3,
                     label=f"{scale} K={d['config']['K']}")
     ax.axhline(next(iter(items))[1]["chance"], color="gray", ls=":", lw=0.8, label="chance")
-    _eps_axis(ax, ticks=[3.21, 9.31, 22.13, 64.0])
-    ax.set_ylabel("answer-recall@5")
+    ax.set_xscale("log"); ax.set_xticks([3, 8, 16, 64]); ax.set_xticklabels(["3", "8", "16", "clean"])
+    ax.set_xlabel("privacy budget epsilon (Skellam RDP)"); ax.set_ylabel("answer-recall@5")
     ax.set_title("Distilled-notes utility: density lifts DP retention (500u vs 100u)")
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -232,8 +161,8 @@ def fig_distilled_leakage(data):
         x, y, e = _series(rows, "lc_auc_mean")
         ax.errorbar(x, y, yerr=e, capsize=3, label=f"{src} (tail-AUC)", **style)
     ax.axhline(0.5, color="k", ls="--", lw=0.8, label="chance")
-    _eps_axis(ax, ticks=[3.21, 9.31, 22.13, 64.0])
-    ax.set_ylabel("MIA tail-AUC (low-count)")
+    ax.set_xscale("log"); ax.set_xticks([3, 8, 16, 64]); ax.set_xticklabels(["3", "8", "16", "clean"])
+    ax.set_xlabel("privacy budget epsilon (Skellam RDP)"); ax.set_ylabel("MIA tail-AUC (low-count)")
     ax.set_title(f"Distilled notes leak MORE than raw turns, DP kills both (K={d['config']['K']})")
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -243,20 +172,13 @@ def fig_distilled_leakage(data):
 
 
 def main():
-    global GRID
-    import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--grid", default="rerun_grid_rp",
-                    help="experiment_results/<grid> to draw the headline figures from")
-    a = ap.parse_args()
-    GRID = ROOT / "experiment_results" / a.grid
     data = load()
     if not data:
         print("no JSON in", GRID)
         return
     fig_utility(data)
     fig_leakage(data)
-    fig_projection_ablation()
+    fig_crossover(data)
     fig_distilled_utility(data)
     fig_distilled_leakage(data)
     print("wrote figures ->", FIG)

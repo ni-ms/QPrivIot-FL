@@ -7,7 +7,7 @@
 #   SEEDS=0,1,2,3,4,5,6,7 bash scripts/shell/rerun_grid.sh
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"   # scripts/shell/ -> repo root
-PY=.venv/bin/python; [[ -x "$PY" ]] || PY=.venv/Scripts/python.exe   # Linux | Windows venv
+PY=.venv/bin/python
 AGENTMEM=scripts/agentmem
 SEEDS=${SEEDS:-0,1,2,3,4}
 OUT=experiment_results/rerun_grid

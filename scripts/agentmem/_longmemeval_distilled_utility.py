@@ -25,19 +25,13 @@ from huggingface_hub import hf_hub_download
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from _agentmem_probe import (assign_buckets, choose_clip, clip_rows_to_norm, make_projector,  # noqa: E402
-                            secagg_skellam_release, single_shot_sigma)
+from _agentmem_probe import assign_buckets, clip_rows_to_norm, secagg_skellam_release, single_shot_sigma  # noqa: E402
 
 _CACHE = Path(__file__).resolve().parents[2] / "experiment_results"
 
 
 def load_distilled_emb(distilled_path):
     cache = _CACHE / (Path(distilled_path).stem + "_emb.npz")
-    if not cache.exists():
-        # Build the embedding cache on demand (shared with _longmemeval_distilled_analysis)
-        # so utility no longer depends on a leakage run having been executed first.
-        from _longmemeval_distilled_analysis import embed_distilled
-        return embed_distilled(distilled_path)
     z = np.load(cache)
     return z["emb"], z["user"]
 
@@ -46,7 +40,7 @@ def encode_qa(n_users, variant="oracle"):
     path = hf_hub_download("xiaowu0162/longmemeval-cleaned",
                            "longmemeval_oracle.json" if variant == "oracle" else "longmemeval_s_cleaned.json",
                            repo_type="dataset")
-    data = json.load(open(path, encoding="utf-8"))[:n_users]
+    data = json.load(open(path))[:n_users]
     from sentence_transformers import SentenceTransformer
     m = SentenceTransformer("all-MiniLM-L6-v2")
     q = m.encode([d["question"] for d in data], normalize_embeddings=False).astype(np.float32)
@@ -76,10 +70,10 @@ def run(args):
     metrics = {lab: [] for lab, _ in sigma_specs}
     for seed in seeds:
         rng = np.random.default_rng(seed)
-        tf = make_projector(note_raw, args.d, seed, args.proj, public="20ng")
-        note_emb = normalize(tf(note_raw)).astype(np.float32)
-        q_emb = normalize(tf(q_raw)).astype(np.float32)
-        a_emb = normalize(tf(a_raw)).astype(np.float32)
+        pca = PCA(n_components=args.d, random_state=seed)
+        note_emb = normalize(pca.fit_transform(note_raw)).astype(np.float32)
+        q_emb = normalize(pca.transform(q_raw)).astype(np.float32)
+        a_emb = normalize(pca.transform(a_raw)).astype(np.float32)
         anchors = normalize(rng.standard_normal((args.K, args.d))).astype(np.float32)
         bucket = assign_buckets(note_emb, anchors)
 
@@ -96,10 +90,10 @@ def run(args):
         uc = [np.zeros(args.K) for _ in range(N)]
         for i in range(len(note_emb)):
             uv[note_user[i]][bucket[i]] += note_emb[i]; uc[note_user[i]][bucket[i]] += 1.0
-        C_v = choose_clip([np.linalg.norm(v) for v in uv], seed, args.clip_eps)
+        C_v = float(np.percentile([np.linalg.norm(v) for v in uv], 95))
         for u in range(N):
             uv[u] = clip_rows_to_norm(uv[u].reshape(1, -1), C_v).reshape(args.K, args.d)
-        B_v = C_v   # public quantiser bound (B := C never clips)
+        B_v = max(float(np.max([np.max(np.abs(v)) for v in uv])), 1e-6)
         nonempty = np.sum(uc, axis=0) > 0.5
 
         valid = target_bucket >= 0
@@ -127,7 +121,7 @@ def run(args):
                 for lab, sigma in sigma_specs]
         out = {"script": "distilled_utility", "metric": f"answer-recall@{args.topk}",
                "chance": args.topk / args.K, "seeds": seeds,
-               "config": {"variant": "oracle", "proj": args.proj, "clip_eps": args.clip_eps, "distilled": Path(args.distilled).stem,
+               "config": {"variant": "oracle", "distilled": Path(args.distilled).stem,
                           "K": args.K, "d": args.d, "topk": args.topk},
                "stats": {"N": int(N), "notes": int(len(note_raw))}, "rows": rows}
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
@@ -140,10 +134,6 @@ if __name__ == "__main__":
     p.add_argument("--distilled", type=str, required=True)
     p.add_argument("--K", type=int, default=64)
     p.add_argument("--d", type=int, default=32)
-    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1,
-                   help="eps spent DP-selecting the clip bound C (0 = leaky empirical p95)")
-    p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
-                   help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--topk", type=int, default=5)
     p.add_argument("--eps", type=str, default="16,8,3")
     p.add_argument("--fl_sigma", type=float, default=2.854)

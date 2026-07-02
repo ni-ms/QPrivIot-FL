@@ -23,22 +23,12 @@ from qpriviot_fl.privacy_utils import skellam_rdp_epsilon  # noqa: E402
 
 import math
 
-sys.stdout.reconfigure(encoding="utf-8")  # the summary lines below use non-ASCII glyphs
-
 DELTA = 1e-5
-# Sigmas used in the experiments. The exploration labels eps=16/8/3 were set via the classic
-# Gaussian bound, which FIXES sigma = sqrt(2 ln(1.25/delta)) / label. Use those exact values:
-# rounding them to 3 decimals first (0.303 / 0.606 / 1.615) shifts the reported eps by ~0.01
-# (e.g. 9.31 -> 9.30), which is how the paper's tables drifted apart from each other.
-_Z = math.sqrt(2 * math.log(1.25 / 1e-5))
-SIGMAS = {"'eps=16'": _Z / 16, "'eps=8'": _Z / 8, "'eps=3'": _Z / 3, "FL-sigma": 2.854}
+# sigmas used in the experiments (were labelled eps=16/8/3 + FL-stress via the classic bound)
+SIGMAS = {"'eps=16'": 0.303, "'eps=8'": 0.606, "'eps=3'": 1.615, "FL-sigma": 2.854}
 # operating point K=32, d=32: sum-vector release has K*d coords, counts release has K coords
 DIM_VEC, DIM_CNT = 32 * 32, 32
-# The mechanism's actual bounds: the DP-selected clip lands at C=32 on the public grid, and
-# B := C (paper §5.2), so Delta_2 = C * (range_max/B) = range_max = 1e6 exactly. The leading
-# RDP term is independent of C and B, but the discretisation correction is not, so use the
-# real values rather than placeholders.
-CLIP, QBOUND = 32.0, 32.0
+CLIP, QBOUND = 1.0, 10.0  # representative; leading RDP term is independent of these
 
 
 def gaussian_rdp_eps(sigma, delta, releases, orders=range(2, 257)):
