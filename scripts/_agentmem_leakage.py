@@ -209,6 +209,30 @@ def run(args):
     print(f"\nclean AUC(all)={clean_auc:.3f}, clean AUC(low-count tail)={clean_lc:.3f}; ideal=0.500.")
     print("Headline: does AUC fall toward 0.5 as eps tightens (esp. the leaky tail), while utility holds?")
 
+    if args.json:
+        import json as _json
+        rows = []
+        for lab, sigma in sigma_specs:
+            a_m, a_s = ms(metrics[lab]["auc"])
+            l_m, l_s = ms(metrics[lab]["lc_auc"])
+            g_m, g_s = ms(metrics[lab]["gap"])
+            t_m, t_s = ms(metrics[lab]["topic"])
+            rows.append({"label": lab, "sigma": sigma,
+                         "auc_mean": a_m, "auc_std": a_s,
+                         "lc_auc_mean": l_m, "lc_auc_std": l_s,
+                         "gap_mean": g_m, "gap_std": g_s,
+                         "topic_mean": t_m, "topic_std": t_s,
+                         "auc_per_seed": [float(x) for x in metrics[lab]["auc"]],
+                         "lc_auc_per_seed": [float(x) for x in metrics[lab]["lc_auc"]]})
+        out = {"script": "agentmem_leakage", "metric": "MIA-AUC / tail-AUC / extract-gap / utility",
+               "seeds": seeds, "embedder": args.embedder, "lc_frac": lc_frac,
+               "config": {"N": args.N, "K": args.K, "d": args.d, "M": args.M,
+                          "alpha": args.alpha, "lowcount": args.lowcount, "eps": args.eps},
+               "rows": rows}
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        _json.dump(out, open(args.json, "w"), indent=2)
+        print(f"[json] wrote {args.json}")
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -222,4 +246,5 @@ if __name__ == "__main__":
     p.add_argument("--lowcount", type=int, default=3)
     p.add_argument("--embedder", type=str, default="tfidf", choices=["tfidf", "st"])
     p.add_argument("--seeds", type=str, default="0,1")
+    p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
     run(p.parse_args())

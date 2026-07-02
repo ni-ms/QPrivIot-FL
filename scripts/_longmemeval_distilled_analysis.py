@@ -106,6 +106,22 @@ def print_table(title, sigma_specs, metrics, lc_frac, N, n_notes):
         print(f"{lab:<10}{a:>12.3f}{l:>12.3f}{g:>14.3f}")
 
 
+def _rows(sigma_specs, metrics):
+    """(sigma_specs, metrics) -> list of per-release rows with mean/std, keyed like the
+    other leakage scripts (auc_mean / lc_auc_mean / gap_mean)."""
+    def ms(xs):
+        return (float(np.mean(xs)) if xs else float("nan"),
+                float(np.std(xs)) if len(xs) > 1 else 0.0)
+    out = []
+    for lab, sigma in sigma_specs:
+        a_m, a_s = ms(metrics[lab]["auc"])
+        l_m, l_s = ms(metrics[lab]["lc"])
+        g_m, g_s = ms(metrics[lab]["gap"])
+        out.append({"label": lab, "sigma": sigma, "auc_mean": a_m, "auc_std": a_s,
+                    "lc_auc_mean": l_m, "lc_auc_std": l_s, "gap_mean": g_m, "gap_std": g_s})
+    return out
+
+
 def run(args):
     seeds = [int(s) for s in args.seeds.split(",")]
     eps = [float(e) for e in args.eps.split(",")]
@@ -119,11 +135,25 @@ def run(args):
     r_emb, r_user = r_emb[mask], r_user[mask]
 
     print(f"=== Distilled vs Raw leakage (K={args.K}, d={args.d}, {n_users} users) ===")
-    ss, m, lf, N = run_leakage(r_emb, r_user, args.K, args.d, seeds, eps, args.M, args.lowcount, args.fl_sigma)
-    print_table("RAW dialogue turns", ss, m, lf, N, len(r_emb))
-    ss, m, lf, N = run_leakage(d_emb, d_user, args.K, args.d, seeds, eps, args.M, args.lowcount, args.fl_sigma)
-    print_table("LLM-DISTILLED notes", ss, m, lf, N, len(d_emb))
+    ss_r, m_r, lf_r, N_r = run_leakage(r_emb, r_user, args.K, args.d, seeds, eps, args.M, args.lowcount, args.fl_sigma)
+    print_table("RAW dialogue turns", ss_r, m_r, lf_r, N_r, len(r_emb))
+    ss_d, m_d, lf_d, N_d = run_leakage(d_emb, d_user, args.K, args.d, seeds, eps, args.M, args.lowcount, args.fl_sigma)
+    print_table("LLM-DISTILLED notes", ss_d, m_d, lf_d, N_d, len(d_emb))
     print("\n(MIA-AUC / tail-AUC: 0.5 = no leakage. Does DP drive both sources to ~0.5?)")
+
+    if args.json:
+        out = {"script": "distilled_leakage",
+               "metric": "MIA-AUC / tail-AUC / extract-gap (raw vs distilled)", "seeds": seeds,
+               "config": {"variant": "oracle", "distilled": Path(args.distilled).stem,
+                          "K": args.K, "d": args.d, "M": args.M, "lowcount": args.lowcount},
+               "sources": {
+                   "raw": {"lc_frac": lf_r, "users": int(N_r), "notes": int(len(r_emb)),
+                           "rows": _rows(ss_r, m_r)},
+                   "distilled": {"lc_frac": lf_d, "users": int(N_d), "notes": int(len(d_emb)),
+                                 "rows": _rows(ss_d, m_d)}}}
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        json.dump(out, open(args.json, "w"), indent=2)
+        print(f"[json] wrote {args.json}")
 
 
 if __name__ == "__main__":
@@ -136,4 +166,5 @@ if __name__ == "__main__":
     p.add_argument("--eps", type=str, default="16,8,3")
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--seeds", type=str, default="0,1")
+    p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
     run(p.parse_args())

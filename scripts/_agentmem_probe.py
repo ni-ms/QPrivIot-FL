@@ -317,6 +317,26 @@ def run(args):
         print(f"{lab:<18}{sigma:>8.3f}{r_m:>9.3f}+/-{r_s:<4.2f}{t_m:>11.3f}+/-{t_s:<4.2f}")
     print("\n(recall@k = overlap of top-k retrieved centroids, DP vs noise-free memory)")
 
+    if args.json:
+        import json as _json
+        rows = []
+        for lab, sigma in sigma_specs:
+            r_m, r_s = ms(metrics[lab]["recall"])
+            t_m, t_s = ms(metrics[lab]["topic_dp"])
+            rows.append({"label": lab, "sigma": sigma,
+                         "recall_mean": r_m, "recall_std": r_s,
+                         "topic_mean": t_m, "topic_std": t_s,
+                         "recall_per_seed": [float(x) for x in metrics[lab]["recall"]],
+                         "topic_per_seed": [float(x) for x in metrics[lab]["topic_dp"]]})
+        out = {"script": "agentmem_probe", "metric": f"topic-acc / recall@{args.k}",
+               "seeds": seeds, "embedder": args.embedder,
+               "ref": {"raw_knn": rk_m, "clean_centroid": tc_m},
+               "config": {"N": args.N, "K": args.K, "d": args.d, "M": args.M,
+                          "k": args.k, "alpha": args.alpha, "eps": args.eps}, "rows": rows}
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        _json.dump(out, open(args.json, "w"), indent=2)
+        print(f"[json] wrote {args.json}")
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -330,4 +350,5 @@ if __name__ == "__main__":
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--embedder", type=str, default="tfidf", choices=["tfidf", "st"])
     p.add_argument("--seeds", type=str, default="0,1")
+    p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
     run(p.parse_args())

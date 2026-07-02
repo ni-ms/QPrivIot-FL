@@ -17,6 +17,7 @@ Usage:
   .venv/bin/python scripts/_longmemeval_probe.py --K 64 --d 32 --topk 5 --eps 16,8,3 --seeds 0,1
 """
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -177,6 +178,21 @@ def run(args):
         print(f"{lab:<14}{sigma:>8.3f}{m:>16.3f} +/-{s:<5.2f}")
     print(f"\nchance ~= {args.topk/args.K:.3f}. Does clean >> chance (mapping works) and DP hold up?")
 
+    if args.json:
+        rows = [{"label": lab, "sigma": sigma,
+                 "mean": float(np.mean(metrics[lab])),
+                 "std": float(np.std(metrics[lab])) if len(metrics[lab]) > 1 else 0.0,
+                 "per_seed": [float(x) for x in metrics[lab]]}
+                for lab, sigma in sigma_specs]
+        out = {"script": "longmemeval_probe", "metric": f"evidence-recall@{args.topk}",
+               "chance": args.topk / args.K, "seeds": seeds,
+               "config": {"variant": args.variant, "K": args.K, "d": args.d,
+                          "topk": args.topk, "release": args.release, "eps": args.eps},
+               "stats": stats, "rows": rows}
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        json.dump(out, open(args.json, "w"), indent=2)
+        print(f"[json] wrote {args.json}")
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -190,4 +206,5 @@ if __name__ == "__main__":
     p.add_argument("--eps", type=str, default="16,8,3")
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--seeds", type=str, default="0,1")
+    p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
     run(p.parse_args())
