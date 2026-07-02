@@ -24,10 +24,10 @@ from sklearn.preprocessing import normalize
 from huggingface_hub import hf_hub_download
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _agentmem_probe import assign_buckets, clip_rows_to_norm, secagg_skellam_release, single_shot_sigma  # noqa: E402
 
-_CACHE = Path(__file__).resolve().parents[1] / "experiment_results"
+_CACHE = Path(__file__).resolve().parents[2] / "experiment_results"
 
 
 def load_distilled_emb(distilled_path):

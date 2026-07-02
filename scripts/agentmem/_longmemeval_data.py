@@ -21,7 +21,7 @@ from huggingface_hub import hf_hub_download
 
 _REPO = "xiaowu0162/longmemeval-cleaned"
 _FILES = {"oracle": "longmemeval_oracle.json", "s": "longmemeval_s_cleaned.json"}
-_CACHE_DIR = Path(__file__).resolve().parents[1] / "experiment_results"
+_CACHE_DIR = Path(__file__).resolve().parents[2] / "experiment_results"
 
 
 def load_longmemeval(variant="oracle", min_chars=8):

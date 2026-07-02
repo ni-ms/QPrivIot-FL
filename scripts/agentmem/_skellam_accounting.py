@@ -18,7 +18,7 @@ axis does not change any ordering — it only makes the privacy claim rigorous.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from qpriviot_fl.privacy_utils import skellam_rdp_epsilon  # noqa: E402
 
 import math

@@ -21,7 +21,7 @@ from huggingface_hub import hf_hub_download
 
 _REPO = "xiaowu0162/longmemeval-cleaned"
 _FILES = {"oracle": "longmemeval_oracle.json", "s": "longmemeval_s_cleaned.json"}
-_OUT = Path(__file__).resolve().parents[1] / "experiment_results"
+_OUT = Path(__file__).resolve().parents[2] / "experiment_results"
 _OLLAMA = "http://localhost:11434/api/generate"
 
 PROMPT = """You are a memory-extraction module for a personal AI assistant. From the

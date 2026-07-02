@@ -17,7 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 GRID = ROOT / "experiment_results" / "rerun_grid"
 FIG = ROOT / "figures"
 FIG.mkdir(exist_ok=True)

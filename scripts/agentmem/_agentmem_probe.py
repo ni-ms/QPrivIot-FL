@@ -47,7 +47,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD, PCA
 from sklearn.preprocessing import normalize
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from qpriviot_fl.privacy_utils import (  # noqa: E402
     quantize,
     dequantize,
@@ -100,7 +100,7 @@ def clip_rows_to_norm(mat, C):
     return mat * factor
 
 
-_ST_CACHE = str(Path(__file__).resolve().parents[1] / "experiment_results" / "_st_20ng_raw.npz")
+_ST_CACHE = str(Path(__file__).resolve().parents[2] / "experiment_results" / "_st_20ng_raw.npz")
 
 
 def _encode_st_raw(model_name="all-MiniLM-L6-v2"):

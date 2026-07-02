@@ -10,7 +10,7 @@ import csv
 import json
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parents[1] / "experiment_results" / "rerun_grid"
+OUT = Path(__file__).resolve().parents[2] / "experiment_results" / "rerun_grid"
 
 
 def load():

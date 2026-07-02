@@ -1,11 +1,14 @@
-"""QPrivIoT-FL: Adaptive Privacy-Preserving Federated Learning for IoT Devices"""
+"""QPrivIoT-FL: shared privacy/crypto substrate for the agent-memory experiments.
+
+The Flower FL app (client_app / server_app / task / device_profile / config) that
+originally lived here was archived to scripts/archive/flower_app/ when the project
+pivoted from the (scooped) QFL direction to federated agent-memory. Only privacy_utils
+— the SecAgg + Skellam crypto reused by the active experiments and tests — remains.
+To run the old `flwr run` FL app again, restore those modules into this package.
+"""
 
 __version__ = "0.1.0"
 
-
-from qpriviot_fl.config import DEFAULT_CONFIG
-from qpriviot_fl.device_profile import profile_device
-from qpriviot_fl.task import make_model, load_data, train, test
 from qpriviot_fl.privacy_utils import (
     RenyiPrivacyAccountant,
     allocate_adaptive_noise,
@@ -13,12 +16,6 @@ from qpriviot_fl.privacy_utils import (
 )
 
 __all__ = [
-    "DEFAULT_CONFIG",
-    "profile_device",
-    "make_model",
-    "load_data",
-    "train",
-    "test",
     "RenyiPrivacyAccountant",
     "allocate_adaptive_noise",
     "apply_dp_noise_per_layer",
