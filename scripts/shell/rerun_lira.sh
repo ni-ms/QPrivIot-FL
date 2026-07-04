@@ -12,9 +12,7 @@ AGENTMEM=scripts/agentmem
 SEEDS=${SEEDS:-0,1,2}
 SHADOWS=${SHADOWS:-48}
 TARGETS=${TARGETS:-1200}
-PROJ=${PROJ:-randproj}
-CEPS=${CEPS:-0.1}
-OUT=experiment_results/lira_rp
+OUT=experiment_results/lira
 mkdir -p "$OUT" logs
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 

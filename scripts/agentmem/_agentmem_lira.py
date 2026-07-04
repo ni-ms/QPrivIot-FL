@@ -36,7 +36,6 @@ from sklearn.metrics import roc_auc_score
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _agentmem_probe import (  # noqa: E402
-    choose_clip,
     assign_buckets, clip_rows_to_norm, secagg_skellam_release, single_shot_sigma,
 )
 
@@ -44,7 +43,7 @@ _CACHE = Path(__file__).resolve().parents[2] / "experiment_results"
 
 
 # ------------------------------- data -------------------------------
-def load_notes(source, d, seed, proj="pca"):
+def load_notes(source, d, seed):
     """Return (note_emb[N,d] L2-normalized, ) for the note universe."""
     if source in ("oracle", "s"):
         from _longmemeval_data import get_embeddings
@@ -53,35 +52,18 @@ def load_notes(source, d, seed, proj="pca"):
         from _agentmem_probe import build_embeddings
         Etr, _, Ete, _, _ = build_embeddings(384, seed, "st")  # 384-d raw ST, reduce below
         raw = np.concatenate([Etr, Ete], axis=0)
-    elif source == "distilled":
-        # The REALISTIC agent-memory payload (A-MEM/Mem0-style notes distilled by a local
-        # LLM; paper §7.6). Without this arm, the distilled-payload result would rest only
-        # on the uncalibrated cosine proxy -- the very instrument §7.5 shows to be blind --
-        # so the claim "DP collapses the attack on the realistic payload" would be resting
-        # on an attack we have already disqualified. Cached by _longmemeval_distilled_*.
-        cache = Path(__file__).resolve().parents[2] / "experiment_results" / \
-            "_lme_distilled_oracle_emb.npz"
-        if not cache.exists():
-            raise SystemExit(f"missing {cache}; run _longmemeval_distill.py first")
-        raw = np.load(cache)["emb"]
     else:
         raise ValueError(source)
     raw = raw.astype(np.float32)
-    from _agentmem_probe import make_projector
-    raw = make_projector(raw, d, seed, proj, public=("lme" if source == "st" else "20ng"))(raw)
+    if d < raw.shape[1]:
+        raw = PCA(n_components=d, random_state=seed).fit_transform(raw)
     return normalize(raw).astype(np.float32)
 
 
 # --------------------------- one DP release ---------------------------
-def release_centroids(note_emb, in_mask, user_of, K, d, N, anchors, sigma, seed, C_v):
+def release_centroids(note_emb, in_mask, user_of, K, d, N, anchors, sigma, seed):
     """Vector-only SecAgg+Skellam release of the pooled centroid memory over the IN notes.
-    Returns (centroids[K,d] normalized, contributor_count[K]).
-
-    `C_v` is passed in, NOT recomputed from `in_mask`. Deriving the clip bound from the notes
-    that happen to be IN would make the released centroids depend on whether the *target* is a
-    member -- a membership channel outside the accountant, in the very experiment used to certify
-    membership privacy. C_v is DP-selected once, from the full note universe (see `run`).
-    """
+    Returns (centroids[K,d] normalized, contributor_count[K])."""
     bucket = assign_buckets(note_emb, anchors)
     uv = [np.zeros((K, d), dtype=np.float32) for _ in range(N)]
     cnt = np.zeros(K)
@@ -89,9 +71,10 @@ def release_centroids(note_emb, in_mask, user_of, K, d, N, anchors, sigma, seed,
     for i in idx_in:
         u = user_of[i]; b = bucket[i]
         uv[u][b] += note_emb[i]; cnt[b] += 1.0
+    C_v = float(np.percentile([np.linalg.norm(v) for v in uv], 95)) or 1.0
     for u in range(N):
         uv[u] = clip_rows_to_norm(uv[u].reshape(1, -1), C_v).reshape(K, d)
-    B_v = C_v   # public quantiser bound (B := C never clips)
+    B_v = max(float(np.max([np.max(np.abs(v)) for v in uv])), 1e-6)
     if sigma == 0.0:
         sv = np.sum(uv, axis=0)
     else:
@@ -115,7 +98,7 @@ def tpr_at_fpr(y, score, fpr_target):
     return float(np.mean(pos > thr))
 
 
-def run_lira(note_emb, K, d, N, sigma, seed, n_targets, n_shadows, lowcount, C_v):
+def run_lira(note_emb, K, d, N, sigma, seed, n_targets, n_shadows, lowcount):
     """Offline LiRA at one sigma. Returns dict of AUC / TPR@1% / TPR@0.1% for all + low-count tail."""
     rng = np.random.default_rng(seed)
     n = len(note_emb)
@@ -135,7 +118,7 @@ def run_lira(note_emb, K, d, N, sigma, seed, n_targets, n_shadows, lowcount, C_v
         in_mask[others] = True
         in_mask[targets[incl]] = True
         cent, cnt, bucket = release_centroids(note_emb, in_mask, user_of, K, d, N,
-                                              anchors, sigma, seed * 10_000 + s, C_v)
+                                              anchors, sigma, seed * 10_000 + s)
         cnt_accum += cnt
         sc = _score(note_emb, targets, bucket, cent)
         for t in range(T):
@@ -178,7 +161,7 @@ def run_lira(note_emb, K, d, N, sigma, seed, n_targets, n_shadows, lowcount, C_v
 
 
 # --------------------- reconstruction / decode ---------------------
-def run_extraction(note_emb, K, d, N, sigma, seed, n_pool, C_v):
+def run_extraction(note_emb, K, d, N, sigma, seed, n_pool):
     """MEXTRA analog: decode each released centroid to its nearest note; success = the
     top-1 decoded note is a true in-bucket member. Reports member vs held-out decode acc."""
     rng = np.random.default_rng(seed + 777)
@@ -188,7 +171,7 @@ def run_extraction(note_emb, K, d, N, sigma, seed, n_pool, C_v):
     perm = rng.permutation(n)
     pool = perm[:min(n_pool, int(0.8 * n))]
     in_mask = np.zeros(n, dtype=bool); in_mask[pool] = True
-    cent, cnt, bucket = release_centroids(note_emb, in_mask, user_of, K, d, N, anchors, sigma, seed, C_v)
+    cent, cnt, bucket = release_centroids(note_emb, in_mask, user_of, K, d, N, anchors, sigma, seed)
 
     sims = note_emb @ cent.T          # [n, K] cosine of every note to every centroid
     top1 = np.argmax(sims, axis=0)    # nearest note to each centroid
@@ -213,17 +196,8 @@ def run(args):
     specs = [("inf (clean)", 0.0)] + [(f"eps={e:g}", single_shot_sigma(e)) for e in eps_points]
     specs.append(("FL-sigma", args.fl_sigma))
 
-    note_emb = load_notes(args.source, args.d, seeds[0], args.proj)
+    note_emb = load_notes(args.source, args.d, seeds[0])
     N = args.N
-    # DP-select the clip bound ONCE, from the full note universe -> independent of any target's
-    # membership and of the shadow split. Cost eps_c, composed in the accountant.
-    _uv = np.zeros((N, K_D := args.K * args.d), dtype=np.float32)
-    _bk = assign_buckets(note_emb, normalize(np.random.default_rng(seeds[0]).standard_normal((args.K, args.d))).astype(np.float32))
-    _uo = np.random.default_rng(seeds[0]).integers(0, N, size=len(note_emb))
-    for i in range(len(note_emb)):
-        _uv[_uo[i], _bk[i] * args.d:(_bk[i] + 1) * args.d] += note_emb[i]
-    C_V = choose_clip(np.linalg.norm(_uv, axis=1), seeds[0], args.clip_eps)
-    print(f"public clip bound C = {C_V:.3f}  (DP-selected, eps_c={args.clip_eps})")
     print(f"=== Calibrated LiRA MIA + recon-decode extraction ===")
     print(f"source={args.source} notes={len(note_emb)} | K={args.K} d={args.d} N={N} "
           f"| shadows={args.shadows} targets={args.targets} | seeds={seeds}")
@@ -235,8 +209,8 @@ def run(args):
     for seed in seeds:
         for lab, sigma in specs:
             m = run_lira(note_emb, args.K, args.d, N, sigma, seed,
-                         args.targets, args.shadows, args.lowcount, C_V)
-            e = run_extraction(note_emb, args.K, args.d, N, sigma, seed, args.pool, C_V)
+                         args.targets, args.shadows, args.lowcount)
+            e = run_extraction(note_emb, args.K, args.d, N, sigma, seed, args.pool)
             for k in ["auc", "tpr1", "tpr01", "lc_auc", "lc_tpr1"]:
                 agg[lab][k].append(m[k])
             agg[lab]["decode_acc"].append(e["decode_acc"])
@@ -265,7 +239,7 @@ def run(args):
     if args.json:
         out = {"script": "agentmem_lira", "metric": "LiRA-AUC/TPR + recon-decode",
                "source": args.source, "seeds": seeds, "lc_frac": float(np.mean(lc_frac)),
-               "config": {"proj": args.proj, "clip_eps": args.clip_eps, "N": N, "K": args.K, "d": args.d, "shadows": args.shadows,
+               "config": {"N": N, "K": args.K, "d": args.d, "shadows": args.shadows,
                           "targets": args.targets, "pool": args.pool, "lowcount": args.lowcount,
                           "eps": args.eps},
                "rows": rows}
@@ -276,8 +250,7 @@ def run(args):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--source", type=str, default="oracle",
-                   choices=["oracle", "s", "st", "distilled"])
+    p.add_argument("--source", type=str, default="oracle", choices=["oracle", "s", "st"])
     p.add_argument("--N", type=int, default=500)
     p.add_argument("--K", type=int, default=1024)
     p.add_argument("--d", type=int, default=32)
@@ -287,8 +260,6 @@ if __name__ == "__main__":
     p.add_argument("--lowcount", type=int, default=3)
     p.add_argument("--eps", type=str, default="16,8,3,1")
     p.add_argument("--fl_sigma", type=float, default=2.854)
-    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1)
-    p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"])
     p.add_argument("--seeds", type=str, default="0,1,2")
     p.add_argument("--json", type=str, default=None)
     run(p.parse_args())
