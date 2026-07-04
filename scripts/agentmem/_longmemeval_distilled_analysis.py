@@ -37,7 +37,7 @@ def embed_distilled(distilled_path):
     if cache.exists():
         z = np.load(cache)
         return z["emb"], z["user"]
-    data = json.load(open(distilled_path))
+    data = json.load(open(distilled_path, encoding="utf-8"))
     texts, users = [], []
     for rec in data:
         for note in rec["notes"]:

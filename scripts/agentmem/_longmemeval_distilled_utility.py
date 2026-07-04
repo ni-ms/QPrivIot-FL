@@ -32,6 +32,11 @@ _CACHE = Path(__file__).resolve().parents[2] / "experiment_results"
 
 def load_distilled_emb(distilled_path):
     cache = _CACHE / (Path(distilled_path).stem + "_emb.npz")
+    if not cache.exists():
+        # Build the embedding cache on demand (shared with _longmemeval_distilled_analysis)
+        # so utility no longer depends on a leakage run having been executed first.
+        from _longmemeval_distilled_analysis import embed_distilled
+        return embed_distilled(distilled_path)
     z = np.load(cache)
     return z["emb"], z["user"]
 
@@ -40,7 +45,7 @@ def encode_qa(n_users, variant="oracle"):
     path = hf_hub_download("xiaowu0162/longmemeval-cleaned",
                            "longmemeval_oracle.json" if variant == "oracle" else "longmemeval_s_cleaned.json",
                            repo_type="dataset")
-    data = json.load(open(path))[:n_users]
+    data = json.load(open(path, encoding="utf-8"))[:n_users]
     from sentence_transformers import SentenceTransformer
     m = SentenceTransformer("all-MiniLM-L6-v2")
     q = m.encode([d["question"] for d in data], normalize_embeddings=False).astype(np.float32)
