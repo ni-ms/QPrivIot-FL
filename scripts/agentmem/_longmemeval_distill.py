@@ -56,9 +56,15 @@ def session_text(sess, max_turns=40):
 
 def run(args):
     path = hf_hub_download(_REPO, _FILES[args.variant], repo_type="dataset")
-    data = json.load(open(path))
+    data = json.load(open(path, encoding="utf-8"))
     if args.limit:
         data = data[:args.limit]
+
+    cache = _OUT / f"_lme_distilled_{args.variant}{'_pilot' if args.limit else ''}.json"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+
+    def save(obj):  # checkpoint so a long run survives an interruption / crash
+        json.dump(obj, open(cache, "w", encoding="utf-8"))
 
     out = []
     n_notes = 0
@@ -73,23 +79,22 @@ def run(args):
             except Exception as e:
                 print(f"  [user {ui} sess {si}] LLM error: {repr(e)[:80]}", file=sys.stderr)
                 continue
-            notes = [ln.strip("-• \t") for ln in resp.splitlines() if len(ln.strip()) > 8]
+            notes = [ln.strip("-•* \t") for ln in resp.splitlines() if len(ln.strip()) > 8]
             for note in notes:
                 user_notes.append(note)
                 n_notes += 1
         out.append({"user": ui, "question": ex["question"], "notes": user_notes})
         if (ui + 1) % 10 == 0:
+            save(out)  # incremental checkpoint
             print(f"distilled {ui+1}/{len(data)} users, {n_notes} notes so far", flush=True)
 
-    cache = _OUT / f"_lme_distilled_{args.variant}{'_pilot' if args.limit else ''}.json"
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    json.dump(out, open(cache, "w"))
-    print(f"\nDONE: {len(out)} users, {n_notes} distilled notes → {cache}")
+    save(out)
+    print(f"\nDONE: {len(out)} users, {n_notes} distilled notes -> {cache}")
     # sample
     for ex in out[:2]:
         print(f"\n--- user {ex['user']} Q: {ex['question'][:70]}")
         for note in ex["notes"][:6]:
-            print(f"   • {note[:100]}")
+            print(f"   - {note[:100]}")
 
 
 if __name__ == "__main__":
