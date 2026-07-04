@@ -9,24 +9,29 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qpriviot-fl"
-version = "1.0.0"
-description = ""
+version = "2.0.0"
+description = "Private federated aggregation of LLM-agent memory (SecAgg + Skellam DP)."
 license = "Apache-2.0"
-# Dependencies for your Flower App
+# Active agent-memory paper deps. The former Flower FL app (which needed
+# flwr / flwr-datasets / opacus / torchvision / psutil) was archived to
+# scripts/archive/flower_app/ after the pivot; those deps were dropped here.
+# NOTE: torch is listed unpinned so an existing CUDA build (e.g. +cu124) is not
+# clobbered by a CPU wheel; install the CUDA build separately if needed.
 dependencies = [
-    "flwr[simulation]>=1.22.0",
-    "flwr-datasets[vision]>=0.5.0",
-    "torch==2.7.1",
-    "torchvision==0.22.1",
-    "opacus",
-    "flwr-datasets",
-    "psutil",
-    "matplotlib",
     "numpy",
-    "pyyaml"
+    "torch",                 # qpriviot_fl/privacy_utils.py (SecAgg + Skellam crypto)
+    "scikit-learn",          # TF-IDF/SVD/PCA, roc_auc_score
+    "sentence-transformers", # all-MiniLM-L6-v2 real embeddings
+    "huggingface_hub",       # LongMemEval dataset download
+    "matplotlib",            # figure regeneration
+    "pyyaml",
 ]
 
 [project.optional-dependencies]
+# LLM-distillation of turns -> notes runs against a local Ollama server.
+distill = [
+  "ollama",
+]
 dev = [
   "pytest>=8",
   "pytest-cov",

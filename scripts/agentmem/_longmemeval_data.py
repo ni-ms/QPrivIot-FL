@@ -27,7 +27,7 @@ _CACHE_DIR = Path(__file__).resolve().parents[2] / "experiment_results"
 def load_longmemeval(variant="oracle", min_chars=8):
     """Return dict: note_texts, note_user(int[]), note_ev(bool[]), queries, query_user(int[])."""
     path = hf_hub_download(_REPO, _FILES[variant], repo_type="dataset")
-    data = json.load(open(path))
+    data = json.load(open(path, encoding="utf-8"))
     note_texts, note_user, note_ev = [], [], []
     queries, query_user = [], []
     for ui, ex in enumerate(data):
