@@ -38,8 +38,7 @@ from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from _agentmem_probe import (assign_buckets, choose_clip, clip_rows_to_norm,  # noqa: E402
-                            make_projector, secagg_skellam_release, single_shot_sigma)
+from _agentmem_probe import assign_buckets, clip_rows_to_norm, secagg_skellam_release, single_shot_sigma  # noqa: E402
 
 _OLLAMA = "http://localhost:11434/api/generate"
 _CACHE = Path(__file__).resolve().parents[2] / "experiment_results"
@@ -61,7 +60,7 @@ def ollama(model, system, prompt, timeout=120):
 
 
 # ----------------------------- shared memory -----------------------------
-def load(distilled_path, n_users, d, seed, proj="randproj"):
+def load(distilled_path, n_users, d, seed):
     """Return per-note (text, user, emb[d]) plus the public-corpus embeddings."""
     data = json.load(open(distilled_path, encoding="utf-8"))[:n_users]
     texts, users = [], []
@@ -76,26 +75,22 @@ def load(distilled_path, n_users, d, seed, proj="randproj"):
     else:
         from sentence_transformers import SentenceTransformer
         emb = SentenceTransformer("all-MiniLM-L6-v2").encode(texts, batch_size=256).astype(np.float32)
-    emb = make_projector(emb, d, seed, proj, public="20ng")(emb)   # public-seed projection (paper 4)
+    emb = PCA(n_components=d, random_state=seed).fit_transform(emb) if d < emb.shape[1] else emb
     emb = normalize(emb).astype(np.float32)
     return texts, np.array(users), emb
 
 
-def private_centroids(emb, user_of, K, d, N, anchors, sigma, seed, in_idx, C_v):
-    """Aggregate ONLY the in-pool (member) notes into the shared centroid memory.
-
-    `C_v` is passed in, DP-selected once from the full note universe (paper 5.2). Recomputing it
-    from `in_idx` would make the clip bound -- and hence the release -- depend on which notes are
-    members, i.e. a membership channel outside the accountant.
-    """
+def private_centroids(emb, user_of, K, d, N, anchors, sigma, seed, in_idx):
+    """Aggregate ONLY the in-pool (member) notes into the shared centroid memory."""
     bucket = assign_buckets(emb, anchors)
     uv = [np.zeros((K, d), dtype=np.float32) for _ in range(N)]
     cnt = np.zeros(K)
     for i in in_idx:
         uv[user_of[i]][bucket[i]] += emb[i]; cnt[bucket[i]] += 1.0
+    C_v = float(np.percentile([np.linalg.norm(v) for v in uv], 95)) or 1.0
     for u in range(N):
         uv[u] = clip_rows_to_norm(uv[u].reshape(1, -1), C_v).reshape(K, d)
-    B_v = C_v   # public quantiser bound (B := C never clips)
+    B_v = max(float(np.max([np.max(np.abs(v)) for v in uv])), 1e-6)
     sv = np.sum(uv, axis=0) if sigma == 0 else secagg_skellam_release([[v] for v in uv], sigma, C_v, B_v, N, seed)[0]
     return normalize(sv.astype(np.float32)), cnt, bucket
 
@@ -133,7 +128,7 @@ def note_recovered(st, target, output, thresh):
 def run(args):
     seed = args.seed
     rng = np.random.default_rng(seed)
-    texts, user_of, emb = load(args.distilled, args.users, args.d, seed, args.proj)
+    texts, user_of, emb = load(args.distilled, args.users, args.d, seed)
     N = int(user_of.max() + 1)
     n = len(texts)
     print(f"=== LLM-agent MEXTRA/MRMMIA harness ===")
@@ -143,32 +138,14 @@ def run(args):
     st = SentenceTransformer("all-MiniLM-L6-v2")
 
     anchors = normalize(rng.standard_normal((args.K, args.d))).astype(np.float32)
-    # THREE disjoint splits. Using only two (members / everything-else) silently breaks the MIA:
-    # in `private` mode the agent's context is decoded from the PUBLIC corpus, so if the non-member
-    # candidates ARE that corpus they appear verbatim in the context and score high, while members
-    # never can. That drives MRMMIA-AUC *below* chance (measured 0.31-0.35) -- an artifact of the
-    # harness, not a property of the release. The public corpus must be disjoint from BOTH.
-    #   priv_pool : stored in the shared memory            -> MIA members
-    #   held      : never stored, never shown to the agent -> MIA non-members
-    #   pub       : the adversary's known public corpus    -> decode targets for `private` mode
-    perm = rng.permutation(n)
-    n_mem = n // 2
-    n_held = (n - n_mem) // 2
-    priv_pool = perm[:n_mem]
-    held = perm[n_mem:n_mem + n_held]
-    pub = perm[n_mem + n_held:]
+    # priv_pool = notes stored in the shared memory (members); held = never stored (non-members);
+    # pub = the adversary's known PUBLIC corpus for reconstruction-decode (disjoint from members).
+    perm = rng.permutation(n); priv_pool = perm[:n // 2]; held = perm[n // 2:]
     pool_texts = [texts[i] for i in priv_pool]; pool_emb = emb[priv_pool]
-    public_texts = [texts[i] for i in pub]; public_emb = emb[pub]
+    public_texts = [texts[i] for i in held]; public_emb = emb[held]
 
     sigma = 0.0 if args.eps <= 0 else single_shot_sigma(args.eps)
-    # DP-select the public clip bound ONCE, from the full note universe (paper 5.2).
-    _bk = assign_buckets(emb, anchors)
-    _uv = np.zeros((N, args.K * args.d), dtype=np.float32)
-    for i in range(n):
-        _uv[user_of[i], _bk[i] * args.d:(_bk[i] + 1) * args.d] += emb[i]
-    C_V = choose_clip(np.linalg.norm(_uv, axis=1), seed, args.clip_eps)
-    print(f"public clip bound C = {C_V:.3f}  (DP-selected, eps_c={args.clip_eps})")
-    cent, cnt, bucket = private_centroids(emb, user_of, args.K, args.d, N, anchors, sigma, seed, priv_pool, C_V)
+    cent, cnt, bucket = private_centroids(emb, user_of, args.K, args.d, N, anchors, sigma, seed, priv_pool)
 
     results = {}
     for mode in ["raw", "private"]:
@@ -205,7 +182,6 @@ def run(args):
     if args.json:
         out = {"script": "agentmem_llm_attack", "model": args.model, "seed": seed,
                "config": {"users": N, "notes": n, "K": args.K, "d": args.d, "k": args.k,
-                          "proj": args.proj, "clip_eps": args.clip_eps,
                           "eps": args.eps, "match": args.match,
                           "extract_trials": args.extract_trials, "mia": args.mia},
                "results": results}
@@ -226,8 +202,6 @@ if __name__ == "__main__":
     p.add_argument("--mia", type=int, default=120)
     p.add_argument("--match", type=float, default=0.9, help="embedding-sim threshold for verbatim recovery")
     p.add_argument("--model", type=str, default="qwen2.5:7b")
-    p.add_argument("--proj", type=str, default="randproj", choices=["pca", "randproj", "publicpca"])
-    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--json", type=str, default=None)
     run(p.parse_args())
