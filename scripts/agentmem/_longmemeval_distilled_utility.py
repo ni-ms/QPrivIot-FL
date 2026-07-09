@@ -25,7 +25,8 @@ from huggingface_hub import hf_hub_download
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from _agentmem_probe import assign_buckets, clip_rows_to_norm, secagg_skellam_release, single_shot_sigma  # noqa: E402
+from _agentmem_probe import (assign_buckets, clip_rows_to_norm, make_projector,  # noqa: E402
+                            secagg_skellam_release, single_shot_sigma)
 
 _CACHE = Path(__file__).resolve().parents[2] / "experiment_results"
 
@@ -75,10 +76,10 @@ def run(args):
     metrics = {lab: [] for lab, _ in sigma_specs}
     for seed in seeds:
         rng = np.random.default_rng(seed)
-        pca = PCA(n_components=args.d, random_state=seed)
-        note_emb = normalize(pca.fit_transform(note_raw)).astype(np.float32)
-        q_emb = normalize(pca.transform(q_raw)).astype(np.float32)
-        a_emb = normalize(pca.transform(a_raw)).astype(np.float32)
+        tf = make_projector(note_raw, args.d, seed, args.proj, public="20ng")
+        note_emb = normalize(tf(note_raw)).astype(np.float32)
+        q_emb = normalize(tf(q_raw)).astype(np.float32)
+        a_emb = normalize(tf(a_raw)).astype(np.float32)
         anchors = normalize(rng.standard_normal((args.K, args.d))).astype(np.float32)
         bucket = assign_buckets(note_emb, anchors)
 
@@ -126,7 +127,7 @@ def run(args):
                 for lab, sigma in sigma_specs]
         out = {"script": "distilled_utility", "metric": f"answer-recall@{args.topk}",
                "chance": args.topk / args.K, "seeds": seeds,
-               "config": {"variant": "oracle", "distilled": Path(args.distilled).stem,
+               "config": {"variant": "oracle", "proj": args.proj, "distilled": Path(args.distilled).stem,
                           "K": args.K, "d": args.d, "topk": args.topk},
                "stats": {"N": int(N), "notes": int(len(note_raw))}, "rows": rows}
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
@@ -139,6 +140,8 @@ if __name__ == "__main__":
     p.add_argument("--distilled", type=str, required=True)
     p.add_argument("--K", type=int, default=64)
     p.add_argument("--d", type=int, default=32)
+    p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
+                   help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--topk", type=int, default=5)
     p.add_argument("--eps", type=str, default="16,8,3")
     p.add_argument("--fl_sigma", type=float, default=2.854)

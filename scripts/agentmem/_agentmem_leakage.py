@@ -106,7 +106,7 @@ def run(args):
 
     for seed in seeds:
         rng = np.random.default_rng(seed)
-        Etr, ytr, Ete, yte, _ = build_embeddings(args.d, seed, args.embedder)
+        Etr, ytr, Ete, yte, _ = build_embeddings(args.d, seed, args.embedder, args.proj)
         n_topics = ytr.max() + 1
         anchors = normalize(rng.standard_normal((args.K, args.d))).astype(np.float32)
 
@@ -225,7 +225,7 @@ def run(args):
                          "auc_per_seed": [float(x) for x in metrics[lab]["auc"]],
                          "lc_auc_per_seed": [float(x) for x in metrics[lab]["lc_auc"]]})
         out = {"script": "agentmem_leakage", "metric": "MIA-AUC / tail-AUC / extract-gap / utility",
-               "seeds": seeds, "embedder": args.embedder, "lc_frac": lc_frac,
+               "seeds": seeds, "embedder": args.embedder, "proj": args.proj, "lc_frac": lc_frac,
                "config": {"N": args.N, "K": args.K, "d": args.d, "M": args.M,
                           "alpha": args.alpha, "lowcount": args.lowcount, "eps": args.eps},
                "rows": rows}
@@ -245,6 +245,8 @@ if __name__ == "__main__":
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--lowcount", type=int, default=3)
     p.add_argument("--embedder", type=str, default="tfidf", choices=["tfidf", "st"])
+    p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
+                   help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--seeds", type=str, default="0,1")
     p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
     run(p.parse_args())
