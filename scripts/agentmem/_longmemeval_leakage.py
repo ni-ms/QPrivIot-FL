@@ -31,6 +31,7 @@ from _longmemeval_data import get_embeddings  # noqa: E402
 from _agentmem_probe import (  # noqa: E402
     assign_buckets,
     clip_rows_to_norm,
+    make_projector,
     single_shot_sigma,
 )
 from _agentmem_leakage import mia_auc, extraction_gap, build_dp_centroids  # noqa: E402
@@ -54,11 +55,8 @@ def run(args):
         note_raw, note_user, note_ev, _, _ = get_embeddings(args.variant)
         N = int(note_user.max() + 1)
 
-        if args.d < note_raw.shape[1]:
-            pca = PCA(n_components=args.d, random_state=seed)
-            note_emb = normalize(pca.fit_transform(note_raw)).astype(np.float32)
-        else:
-            note_emb = normalize(note_raw).astype(np.float32)
+        note_emb = normalize(
+            make_projector(note_raw, args.d, seed, args.proj, public="20ng")(note_raw)).astype(np.float32)
 
         anchors = normalize(rng.standard_normal((args.K, args.d))).astype(np.float32)
         note_bucket = assign_buckets(note_emb, anchors)
@@ -144,7 +142,7 @@ def run(args):
                          "lc_auc_per_seed": [float(x) for x in metrics[lab]["lc_auc"]]})
         out = {"script": "longmemeval_leakage", "metric": "MIA-AUC / tail-AUC / extract-gap",
                "seeds": seeds, "lc_frac": float(np.mean(lc_fracs)),
-               "config": {"variant": args.variant, "K": args.K, "d": args.d,
+               "config": {"variant": args.variant, "K": args.K, "d": args.d, "proj": args.proj,
                           "M": args.M, "lowcount": args.lowcount, "eps": args.eps},
                "corpus": {"users": int(N), "notes": int(len(note_emb))}, "rows": rows}
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
@@ -157,6 +155,8 @@ if __name__ == "__main__":
     p.add_argument("--variant", type=str, default="oracle", choices=["oracle", "s"])
     p.add_argument("--K", type=int, default=1024)
     p.add_argument("--d", type=int, default=32)
+    p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
+                   help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--M", type=int, default=2000)
     p.add_argument("--lowcount", type=int, default=3)
     p.add_argument("--eps", type=str, default="16,8,3,1")

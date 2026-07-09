@@ -43,7 +43,7 @@ _CACHE = Path(__file__).resolve().parents[2] / "experiment_results"
 
 
 # ------------------------------- data -------------------------------
-def load_notes(source, d, seed):
+def load_notes(source, d, seed, proj="pca"):
     """Return (note_emb[N,d] L2-normalized, ) for the note universe."""
     if source in ("oracle", "s"):
         from _longmemeval_data import get_embeddings
@@ -55,8 +55,8 @@ def load_notes(source, d, seed):
     else:
         raise ValueError(source)
     raw = raw.astype(np.float32)
-    if d < raw.shape[1]:
-        raw = PCA(n_components=d, random_state=seed).fit_transform(raw)
+    from _agentmem_probe import make_projector
+    raw = make_projector(raw, d, seed, proj, public=("lme" if source == "st" else "20ng"))(raw)
     return normalize(raw).astype(np.float32)
 
 
@@ -196,7 +196,7 @@ def run(args):
     specs = [("inf (clean)", 0.0)] + [(f"eps={e:g}", single_shot_sigma(e)) for e in eps_points]
     specs.append(("FL-sigma", args.fl_sigma))
 
-    note_emb = load_notes(args.source, args.d, seeds[0])
+    note_emb = load_notes(args.source, args.d, seeds[0], args.proj)
     N = args.N
     print(f"=== Calibrated LiRA MIA + recon-decode extraction ===")
     print(f"source={args.source} notes={len(note_emb)} | K={args.K} d={args.d} N={N} "
@@ -260,6 +260,7 @@ if __name__ == "__main__":
     p.add_argument("--lowcount", type=int, default=3)
     p.add_argument("--eps", type=str, default="16,8,3,1")
     p.add_argument("--fl_sigma", type=float, default=2.854)
+    p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"])
     p.add_argument("--seeds", type=str, default="0,1,2")
     p.add_argument("--json", type=str, default=None)
     run(p.parse_args())
