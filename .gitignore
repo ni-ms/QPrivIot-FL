@@ -175,7 +175,7 @@ results_*.json
 experiment_results/
 logs/
 test_artifacts/
-figures/
+# figures/
 *.npz
 *.pt
 *.pth
