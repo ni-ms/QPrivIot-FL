@@ -31,6 +31,7 @@ from _longmemeval_data import get_embeddings  # noqa: E402
 from _agentmem_probe import (  # noqa: E402
     assign_buckets,
     clip_rows_to_norm,
+    make_projector,
     secagg_skellam_release,
     single_shot_sigma,
 )
@@ -120,13 +121,9 @@ def run(args):
         N = int(note_user.max() + 1)
 
         # project real 384-d embeddings to tiny-d (fit PCA on notes; apply to queries)
-        if args.d < note_raw.shape[1]:
-            pca = PCA(n_components=args.d, random_state=seed)
-            note_emb = normalize(pca.fit_transform(note_raw)).astype(np.float32)
-            q_emb = normalize(pca.transform(q_raw)).astype(np.float32)
-        else:
-            note_emb = normalize(note_raw).astype(np.float32)
-            q_emb = normalize(q_raw).astype(np.float32)
+        tf = make_projector(note_raw, args.d, seed, args.proj, public="20ng")
+        note_emb = normalize(tf(note_raw)).astype(np.float32)
+        q_emb = normalize(tf(q_raw)).astype(np.float32)
 
         anchors = normalize(rng.standard_normal((args.K, args.d))).astype(np.float32)
         note_bucket = assign_buckets(note_emb, anchors)
@@ -186,7 +183,7 @@ def run(args):
                 for lab, sigma in sigma_specs]
         out = {"script": "longmemeval_probe", "metric": f"evidence-recall@{args.topk}",
                "chance": args.topk / args.K, "seeds": seeds,
-               "config": {"variant": args.variant, "K": args.K, "d": args.d,
+               "config": {"variant": args.variant, "K": args.K, "d": args.d, "proj": args.proj,
                           "topk": args.topk, "release": args.release, "eps": args.eps},
                "stats": stats, "rows": rows}
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
@@ -199,6 +196,8 @@ if __name__ == "__main__":
     p.add_argument("--variant", type=str, default="oracle", choices=["oracle", "s"])
     p.add_argument("--K", type=int, default=64)
     p.add_argument("--d", type=int, default=32)
+    p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
+                   help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--topk", type=int, default=5)
     p.add_argument("--release", type=str, default="separate",
                    choices=["separate", "joint", "veconly"],
