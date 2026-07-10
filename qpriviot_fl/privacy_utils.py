@@ -374,6 +374,8 @@ def skellam_rdp_epsilon(
         releases: int = 1,
         l1_sensitivity: Optional[float] = None,
         orders: Optional[List[int]] = None,
+        clip_eps: float = 0.0,
+        clip_releases: int = 0,
 ) -> Tuple[float, float]:
     """Exact (ε, δ)-DP for the (distributed) Skellam mechanism via RDP.
 
@@ -411,18 +413,69 @@ def skellam_rdp_epsilon(
     delta1 = l1_sensitivity if l1_sensitivity is not None else math.sqrt(dim) * delta2
     d2sq = delta2 * delta2
 
+    # Cost of DP-selecting the clip bound C (exponential mechanism, eps_c-DP each time):
+    # eps_c-DP  =>  (eps_c^2/2)-zCDP  =>  RDP_alpha <= alpha * eps_c^2 / 2  [Bun & Steinke 2016].
+    clip_rho = 0.0
+    if clip_eps and clip_eps > 0 and clip_releases > 0:
+        clip_rho = clip_releases * (clip_eps ** 2) / 2.0
+
     best_eps = float("inf")
     best_alpha = 0.0
     for alpha in orders:
         rdp_lead = alpha * d2sq / (2.0 * mu)
         corr = min(((2 * alpha - 1) * d2sq + 6 * delta1) / (4 * mu * mu),
                    3 * delta1 / (2 * mu))
-        rdp = releases * (rdp_lead + corr)
+        rdp = releases * (rdp_lead + corr) + alpha * clip_rho
         eps = rdp + math.log(1.0 / target_delta) / (alpha - 1)
         if eps < best_eps:
             best_eps = eps
             best_alpha = float(alpha)
     return best_eps, best_alpha
+
+
+# Public geometric grid of candidate clip bounds. Each note embedding is L2-unit, and a user with
+# n_u notes has ||V_u||_2 in [sqrt(n_u), n_u]; for agent-memory payloads of tens of notes per user
+# that brackets [2, 64]. The grid is COARSE on purpose: the exponential mechanism's rank error grows
+# like log|grid|/eps_c, and end-to-end utility is flat in C over a factor ~2 (see paper 5.2), so a
+# fine grid buys nothing and costs accuracy.
+PUBLIC_CLIP_GRID = (2.0, 64.0, 16)
+
+
+def dp_quantile_clip(norms, q, eps_c, rng, grid=PUBLIC_CLIP_GRID):
+    """Differentially-private estimate of the q-quantile of per-user payload norms.
+
+    The clip bound C is a PUBLIC parameter of the released mechanism, yet the natural choice
+    (the empirical 95th percentile of user norms) is a function of the private corpus. Releasing
+    it is an unaccounted release. We instead select C from a public candidate grid with the
+    EXPONENTIAL MECHANISM (Smith 2011; McSherry & Talwar 2007) using the rank utility
+
+        u(c) = - | #{u : ||V_u||_2 <= c}  -  q*N |
+
+    Under the paper's neighbouring relation (two datasets differing in exactly one *user*, i.e.
+    replace-one), a single user changes the count by at most 1 while N is fixed, so the utility
+    has sensitivity Delta_u = 1 and the mechanism is eps_c-DP:
+
+        Pr[C = c]  proportional to  exp( eps_c * u(c) / (2 * Delta_u) )
+
+    eps_c composes with the Skellam release in RDP via pure-DP -> zCDP:
+    an eps_c-DP mechanism is (eps_c^2 / 2)-zCDP, hence RDP_alpha <= alpha * eps_c^2 / 2
+    (Bun & Steinke 2016). See `skellam_rdp_epsilon(..., clip_eps=...)`.
+
+    eps_c <= 0 disables the mechanism and returns the (non-private) empirical quantile, which is
+    only for reproducing the superseded, unaccounted baseline.
+    """
+    norms = np.asarray(norms, dtype=np.float64)
+    if eps_c is None or eps_c <= 0:
+        return float(np.percentile(norms, 100.0 * q))
+    lo, hi, n = grid
+    cand = np.geomspace(lo, hi, n)
+    counts = np.searchsorted(np.sort(norms), cand, side="right")
+    util = -np.abs(counts - q * len(norms))          # Delta_u = 1 (replace-one)
+    logits = (eps_c / 2.0) * util
+    logits -= logits.max()
+    p = np.exp(logits)
+    p /= p.sum()
+    return float(rng.choice(cand, p=p))
 
 
 def apply_distributed_skellam_noise(

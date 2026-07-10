@@ -46,6 +46,7 @@ from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _agentmem_probe import (  # noqa: E402
+    choose_clip,
     build_embeddings,
     dirichlet_partition,
     assign_buckets,
@@ -133,13 +134,12 @@ def run(args):
                 b = bucket_of[idx]; v[b] += Etr[idx]; c[b] += 1.0
             user_vecs.append(v); user_cnts.append(c)
 
-        C_v = float(np.percentile([np.linalg.norm(v) for v in user_vecs], 95))
-        C_c = float(np.percentile([np.linalg.norm(c) for c in user_cnts], 95))
+        C_v = choose_clip([np.linalg.norm(v) for v in user_vecs], seed, args.clip_eps)
+        C_c = choose_clip([np.linalg.norm(c) for c in user_cnts], seed, args.clip_eps)
         for u in range(args.N):
             user_vecs[u] = clip_rows_to_norm(user_vecs[u].reshape(1, -1), C_v).reshape(args.K, args.d)
             user_cnts[u] = clip_rows_to_norm(user_cnts[u].reshape(1, -1), C_c).reshape(args.K)
-        B_v = max(float(np.max([np.max(np.abs(v)) for v in user_vecs])), 1e-6)
-        B_c = max(float(np.max([np.max(np.abs(c)) for c in user_cnts])), 1e-6)
+        B_v, B_c = C_v, C_c   # public quantiser bound (B := C never clips)
 
         sum_c_clean = np.sum(user_cnts, axis=0)
         nonempty = sum_c_clean > 0.5
@@ -225,7 +225,7 @@ def run(args):
                          "auc_per_seed": [float(x) for x in metrics[lab]["auc"]],
                          "lc_auc_per_seed": [float(x) for x in metrics[lab]["lc_auc"]]})
         out = {"script": "agentmem_leakage", "metric": "MIA-AUC / tail-AUC / extract-gap / utility",
-               "seeds": seeds, "embedder": args.embedder, "proj": args.proj, "lc_frac": lc_frac,
+               "seeds": seeds, "embedder": args.embedder, "proj": args.proj, "clip_eps": args.clip_eps, "lc_frac": lc_frac,
                "config": {"N": args.N, "K": args.K, "d": args.d, "M": args.M,
                           "alpha": args.alpha, "lowcount": args.lowcount, "eps": args.eps},
                "rows": rows}
@@ -245,6 +245,8 @@ if __name__ == "__main__":
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--lowcount", type=int, default=3)
     p.add_argument("--embedder", type=str, default="tfidf", choices=["tfidf", "st"])
+    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1,
+                   help="eps spent DP-selecting the clip bound C (0 = leaky empirical p95)")
     p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
                    help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--seeds", type=str, default="0,1")

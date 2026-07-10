@@ -97,9 +97,9 @@ def fig_leakage(data):
 # Contrast of slots 2-3 vs a light surface is < 3:1, so identity is ALSO carried by
 # distinct markers + direct end-labels, never by hue alone.
 PROJ_STYLE = [
-    ("data-PCA (leaky)", "rerun_grid",    "#2a78d6", "o", "-"),
-    ("randproj (free)",  "rerun_grid_rp", "#1baf7a", "s", "-"),
-    ("publicPCA (free)", "rerun_grid_pp", "#eda100", "^", "--"),
+    ("data-PCA (leaky)", "rerun_grid_abl_pca", "#2a78d6", "o", "-"),
+    ("randproj (free)",  "rerun_grid_rp",      "#1baf7a", "s", "-"),
+    ("publicPCA (free)", "rerun_grid_abl_pp",  "#eda100", "^", "--"),
 ]
 
 
