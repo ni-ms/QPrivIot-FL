@@ -451,11 +451,14 @@ def dp_quantile_clip(norms, q, eps_c, rng, grid=PUBLIC_CLIP_GRID):
 
         u(c) = - | #{u : ||V_u||_2 <= c}  -  q*N |
 
-    Under the paper's neighbouring relation (two datasets differing in exactly one *user*, i.e.
-    replace-one), a single user changes the count by at most 1 while N is fixed, so the utility
-    has sensitivity Delta_u = 1 and the mechanism is eps_c-DP:
+    Neighbouring = ADD/REMOVE one user (unbounded DP), the same relation that makes the Skellam
+    sensitivity Delta_2 = C exact. Both the count and the target q*N move when a user leaves:
+    removing a user with norm <= c shifts the argument of |.| by 1 - q = 0.05; removing one with
+    norm > c shifts it by q. So Delta_u = max(1 - q, q) = q = 0.95 <= 1, and sampling with
 
-        Pr[C = c]  proportional to  exp( eps_c * u(c) / (2 * Delta_u) )
+        Pr[C = c]  proportional to  exp( eps_c * u(c) / 2 )
+
+    is (q * eps_c)-DP. We charge the full eps_c, a ~5% conservative margin.
 
     eps_c composes with the Skellam release in RDP via pure-DP -> zCDP:
     an eps_c-DP mechanism is (eps_c^2 / 2)-zCDP, hence RDP_alpha <= alpha * eps_c^2 / 2

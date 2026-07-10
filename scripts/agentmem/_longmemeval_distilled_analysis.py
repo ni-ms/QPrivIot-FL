@@ -82,7 +82,7 @@ def run_leakage(note_raw, note_user, K, d, seeds, eps_points, M, lowcount, fl_si
         lc_m = sum_c[mb] <= lowcount; lc_n = sum_c[nb] <= lowcount
         lc_fracs.append(float(np.mean(lc_m)))
         for lab, sigma in sigma_specs:
-            cent = build_dp_centroids(uv, uc, K, d, N, C_v, C_c, B_v, B_c, sigma, seed, nonempty)
+            cent = build_dp_centroids(uv, uc, K, d, N, C_v, C_c, B_v, B_c, sigma, seed, nonempty, gate="none")
             sm, sn = mia_auc(me, mb, cent), mia_auc(ne, nb, cent)
             metrics[lab]["auc"].append(roc_auc_score(y, np.concatenate([sm, sn])))
             if lc_m.sum() >= 10 and lc_n.sum() >= 10:

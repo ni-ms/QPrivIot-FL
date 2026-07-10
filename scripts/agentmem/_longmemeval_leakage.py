@@ -99,7 +99,7 @@ def run(args):
 
         for lab, sigma in sigma_specs:
             cent = build_dp_centroids(user_vecs, user_cnts, args.K, args.d, N,
-                                      C_v, C_c, B_v, B_c, sigma, seed, nonempty)
+                                      C_v, C_c, B_v, B_c, sigma, seed, nonempty, gate="none")
             s_mem = mia_auc(mem_emb, mem_b, cent)
             s_non = mia_auc(non_emb, non_b, cent)
             auc = roc_auc_score(y_true, np.concatenate([s_mem, s_non]))
