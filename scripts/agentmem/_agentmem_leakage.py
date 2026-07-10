@@ -57,15 +57,29 @@ from _agentmem_probe import (  # noqa: E402
 )
 
 
-def build_dp_centroids(user_vecs, user_cnts, K, d, N, C_v, C_c, B_v, B_c, sigma, seed, nonempty):
+def build_dp_centroids(user_vecs, user_cnts, K, d, N, C_v, C_c, B_v, B_c, sigma, seed, nonempty,
+                       gate="oracle"):
+    """Release the private centroid memory.
+
+    gate="none"   : VECTOR-ONLY, no occupancy suppression -- cent[k] = normalize(sum_v[k]) for
+                    EVERY bucket (empty buckets carry pure Skellam noise). This is the recommended
+                    mechanism of 5.3 and it contains NO oracle: nothing here reads the clean counts.
+                    Used for the leakage measurement, so no non-private step touches the numbers.
+    gate="oracle" : legacy path -- suppress buckets flagged empty by the CLEAN counts (non-private;
+                    a no-op at every K<=256 where retrieval is reported, retained only to reproduce
+                    the superseded tables).
+    """
     per_user_v = [[user_vecs[u]] for u in range(N)]
-    per_user_c = [[user_cnts[u].reshape(K, 1)] for u in range(N)]
     if sigma == 0.0:
         sum_v = np.sum(user_vecs, axis=0)
-        sum_c = np.sum(user_cnts, axis=0)
     else:
         sum_v = secagg_skellam_release(per_user_v, sigma, C_v, B_v, N, seed)[0]
-        sum_c = secagg_skellam_release(per_user_c, sigma, C_c, B_c, N, seed)[0].reshape(K)
+    if gate == "none":
+        return normalize(sum_v.astype(np.float32))       # vector-only, all buckets, no oracle
+    # legacy oracle path (two-channel; count cancels under normalize but gates on clean counts)
+    per_user_c = [[user_cnts[u].reshape(K, 1)] for u in range(N)]
+    sum_c = (np.sum(user_cnts, axis=0) if sigma == 0.0
+             else secagg_skellam_release(per_user_c, sigma, C_c, B_c, N, seed)[0].reshape(K))
     sum_c = np.maximum(sum_c, 1.0)
     cent = np.zeros((K, d), dtype=np.float32)
     cent[nonempty] = (sum_v[nonempty] / sum_c[nonempty, None]).astype(np.float32)
@@ -169,7 +183,7 @@ def run(args):
 
         for lab, sigma in sigma_specs:
             cent = build_dp_centroids(user_vecs, user_cnts, args.K, args.d, args.N,
-                                      C_v, C_c, B_v, B_c, sigma, seed, nonempty)
+                                      C_v, C_c, B_v, B_c, sigma, seed, nonempty, gate="none")
             s_mem = mia_auc(mem_emb, mem_b, cent)
             s_non = mia_auc(non_emb, non_b, cent)
             auc = roc_auc_score(y_true, np.concatenate([s_mem, s_non]))
