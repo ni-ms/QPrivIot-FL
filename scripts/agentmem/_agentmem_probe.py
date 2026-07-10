@@ -52,6 +52,7 @@ from qpriviot_fl.privacy_utils import (  # noqa: E402
     quantize,
     dequantize,
     apply_distributed_skellam_noise,
+    dp_quantile_clip,
 )
 
 RANGE_MAX = 1_000_000
@@ -91,6 +92,21 @@ def secagg_skellam_release(per_user_arrays, sigma, clip_norm, quant_bound, num_c
             for j in range(n_arrays):
                 agg_int[j] += q[j].astype(np.int64)
     return dequantize(agg_int, clip_range=quant_bound, range_max=RANGE_MAX)
+
+
+def choose_clip(norms, seed, clip_eps, q=0.95, grid=None):
+    """PUBLIC clip bound C, DP-selected from the per-user payload norms.
+
+    The empirical q-quantile is a function of the private corpus; releasing it as a public
+    mechanism parameter is an unaccounted release. `dp_quantile_clip` selects C from a public
+    grid with the exponential mechanism at cost `clip_eps` (folded into the accountant via
+    `skellam_rdp_epsilon(..., clip_eps=..., clip_releases=1)`). Pass clip_eps=0 to reproduce the
+    superseded, unaccounted empirical p95.
+    """
+    rng = np.random.default_rng((seed * 7 + 991) & 0x7FFFFFFF)
+    if grid is None:
+        from qpriviot_fl.privacy_utils import PUBLIC_CLIP_GRID as grid
+    return float(dp_quantile_clip(norms, q, clip_eps, rng, grid))
 
 
 def clip_rows_to_norm(mat, C):
@@ -285,16 +301,15 @@ def run(args):
         # C_v = 95th pct of per-user ||flattened sum-vector||; C_c likewise for counts.
         v_norms = np.array([np.linalg.norm(v) for v in user_vecs])
         c_norms = np.array([np.linalg.norm(c) for c in user_cnts])
-        C_v = float(np.percentile(v_norms, 95))
-        C_c = float(np.percentile(c_norms, 95))
+        C_v = choose_clip(v_norms, seed, args.clip_eps)
+        C_c = choose_clip(c_norms, seed, args.clip_eps)
         for u in range(args.N):
             fv = user_vecs[u].reshape(1, -1)
             user_vecs[u] = clip_rows_to_norm(fv, C_v).reshape(args.K, args.d)
             user_cnts[u] = clip_rows_to_norm(user_cnts[u].reshape(1, -1), C_c).reshape(args.K)
 
         # quantization bounds cover the observed magnitudes
-        B_v = max(float(np.max([np.max(np.abs(v)) for v in user_vecs])), 1e-6)
-        B_c = max(float(np.max([np.max(np.abs(c)) for c in user_cnts])), 1e-6)
+        B_v, B_c = C_v, C_c   # public quantiser bound: |coord| <= ||V||_2 <= C, so B := C never clips
 
         # ----- clean (noise-free) aggregate -----
         sum_v = np.sum(user_vecs, axis=0)          # (K,d)
@@ -368,7 +383,7 @@ def run(args):
                          "recall_per_seed": [float(x) for x in metrics[lab]["recall"]],
                          "topic_per_seed": [float(x) for x in metrics[lab]["topic_dp"]]})
         out = {"script": "agentmem_probe", "metric": f"topic-acc / recall@{args.k}",
-               "seeds": seeds, "embedder": args.embedder, "proj": args.proj,
+               "seeds": seeds, "embedder": args.embedder, "proj": args.proj, "clip_eps": args.clip_eps,
                "ref": {"raw_knn": rk_m, "clean_centroid": tc_m},
                "config": {"N": args.N, "K": args.K, "d": args.d, "M": args.M,
                           "k": args.k, "alpha": args.alpha, "eps": args.eps}, "rows": rows}
@@ -388,6 +403,8 @@ if __name__ == "__main__":
     p.add_argument("--eps", type=str, default="8,3")
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--embedder", type=str, default="tfidf", choices=["tfidf", "st"])
+    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1,
+                   help="eps spent DP-selecting the clip bound C (0 = leaky empirical p95)")
     p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
                    help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--seeds", type=str, default="0,1")

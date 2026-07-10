@@ -25,7 +25,7 @@ from sklearn.metrics import roc_auc_score
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _longmemeval_data import get_embeddings as get_raw_embeddings  # noqa: E402
-from _agentmem_probe import (assign_buckets, clip_rows_to_norm,  # noqa: E402
+from _agentmem_probe import (assign_buckets, choose_clip, clip_rows_to_norm,  # noqa: E402
                             make_projector, single_shot_sigma)
 from _agentmem_leakage import mia_auc, extraction_gap, build_dp_centroids  # noqa: E402
 
@@ -51,7 +51,7 @@ def embed_distilled(distilled_path):
     return emb, np.array(users)
 
 
-def run_leakage(note_raw, note_user, K, d, seeds, eps_points, M, lowcount, fl_sigma, proj="pca"):
+def run_leakage(note_raw, note_user, K, d, seeds, eps_points, M, lowcount, fl_sigma, proj="pca", clip_eps=0.1):
     sigma_specs = [("inf", 0.0)] + [(f"eps={e:g}", single_shot_sigma(e)) for e in eps_points]
     sigma_specs.append(("FL", fl_sigma))
     metrics = {lab: {"auc": [], "lc": [], "gap": []} for lab, _ in sigma_specs}
@@ -68,13 +68,12 @@ def run_leakage(note_raw, note_user, K, d, seeds, eps_points, M, lowcount, fl_si
         uv = [np.zeros((K, d)) for _ in range(N)]; uc = [np.zeros(K) for _ in range(N)]
         for i in pool:
             uv[note_user[i]][bucket[i]] += note_emb[i]; uc[note_user[i]][bucket[i]] += 1.0
-        C_v = float(np.percentile([np.linalg.norm(v) for v in uv], 95))
-        C_c = float(np.percentile([np.linalg.norm(c) for c in uc], 95))
+        C_v = choose_clip([np.linalg.norm(v) for v in uv], seed, clip_eps)
+        C_c = choose_clip([np.linalg.norm(c) for c in uc], seed, clip_eps)
         for u in range(N):
             uv[u] = clip_rows_to_norm(uv[u].reshape(1, -1), C_v).reshape(K, d)
             uc[u] = clip_rows_to_norm(uc[u].reshape(1, -1), C_c).reshape(K)
-        B_v = max(float(np.max([np.max(np.abs(v)) for v in uv])), 1e-6)
-        B_c = max(float(np.max([np.max(np.abs(c)) for c in uc])), 1e-6)
+        B_v, B_c = C_v, C_c   # public quantiser bound (B := C never clips)
         sum_c = np.sum(uc, axis=0); nonempty = sum_c > 0.5
         m_sel = rng.choice(pool, size=min(M, len(pool)), replace=False)
         n_sel = rng.choice(hold, size=min(M, len(hold)), replace=False)
@@ -134,16 +133,16 @@ def run(args):
     r_emb, r_user = r_emb[mask], r_user[mask]
 
     print(f"=== Distilled vs Raw leakage (K={args.K}, d={args.d}, {n_users} users) ===")
-    ss_r, m_r, lf_r, N_r = run_leakage(r_emb, r_user, args.K, args.d, seeds, eps, args.M, args.lowcount, args.fl_sigma, args.proj)
+    ss_r, m_r, lf_r, N_r = run_leakage(r_emb, r_user, args.K, args.d, seeds, eps, args.M, args.lowcount, args.fl_sigma, args.proj, args.clip_eps)
     print_table("RAW dialogue turns", ss_r, m_r, lf_r, N_r, len(r_emb))
-    ss_d, m_d, lf_d, N_d = run_leakage(d_emb, d_user, args.K, args.d, seeds, eps, args.M, args.lowcount, args.fl_sigma, args.proj)
+    ss_d, m_d, lf_d, N_d = run_leakage(d_emb, d_user, args.K, args.d, seeds, eps, args.M, args.lowcount, args.fl_sigma, args.proj, args.clip_eps)
     print_table("LLM-DISTILLED notes", ss_d, m_d, lf_d, N_d, len(d_emb))
     print("\n(MIA-AUC / tail-AUC: 0.5 = no leakage. Does DP drive both sources to ~0.5?)")
 
     if args.json:
         out = {"script": "distilled_leakage",
                "metric": "MIA-AUC / tail-AUC / extract-gap (raw vs distilled)", "seeds": seeds,
-               "config": {"variant": "oracle", "proj": args.proj, "distilled": Path(args.distilled).stem,
+               "config": {"variant": "oracle", "proj": args.proj, "clip_eps": args.clip_eps, "distilled": Path(args.distilled).stem,
                           "K": args.K, "d": args.d, "M": args.M, "lowcount": args.lowcount},
                "sources": {
                    "raw": {"lc_frac": lf_r, "users": int(N_r), "notes": int(len(r_emb)),
@@ -160,6 +159,8 @@ if __name__ == "__main__":
     p.add_argument("--distilled", type=str, required=True)
     p.add_argument("--K", type=int, default=256)
     p.add_argument("--d", type=int, default=32)
+    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1,
+                   help="eps spent DP-selecting the clip bound C (0 = leaky empirical p95)")
     p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
                    help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--M", type=int, default=1000)
