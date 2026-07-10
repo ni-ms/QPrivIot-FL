@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _longmemeval_data import get_embeddings  # noqa: E402
 from _agentmem_probe import (  # noqa: E402
     assign_buckets,
+    choose_clip,
     clip_rows_to_norm,
     make_projector,
     single_shot_sigma,
@@ -75,13 +76,12 @@ def run(args):
             u = note_user[i]; b = note_bucket[i]
             user_vecs[u][b] += note_emb[i]; user_cnts[u][b] += 1.0
 
-        C_v = float(np.percentile([np.linalg.norm(v) for v in user_vecs], 95))
-        C_c = float(np.percentile([np.linalg.norm(c) for c in user_cnts], 95))
+        C_v = choose_clip([np.linalg.norm(v) for v in user_vecs], seed, args.clip_eps)
+        C_c = choose_clip([np.linalg.norm(c) for c in user_cnts], seed, args.clip_eps)
         for u in range(N):
             user_vecs[u] = clip_rows_to_norm(user_vecs[u].reshape(1, -1), C_v).reshape(args.K, args.d)
             user_cnts[u] = clip_rows_to_norm(user_cnts[u].reshape(1, -1), C_c).reshape(args.K)
-        B_v = max(float(np.max([np.max(np.abs(v)) for v in user_vecs])), 1e-6)
-        B_c = max(float(np.max([np.max(np.abs(c)) for c in user_cnts])), 1e-6)
+        B_v, B_c = C_v, C_c   # public quantiser bound (B := C never clips)
         sum_c_clean = np.sum(user_cnts, axis=0)
         nonempty = sum_c_clean > 0.5
 
@@ -142,7 +142,7 @@ def run(args):
                          "lc_auc_per_seed": [float(x) for x in metrics[lab]["lc_auc"]]})
         out = {"script": "longmemeval_leakage", "metric": "MIA-AUC / tail-AUC / extract-gap",
                "seeds": seeds, "lc_frac": float(np.mean(lc_fracs)),
-               "config": {"variant": args.variant, "K": args.K, "d": args.d, "proj": args.proj,
+               "config": {"variant": args.variant, "K": args.K, "d": args.d, "proj": args.proj, "clip_eps": args.clip_eps,
                           "M": args.M, "lowcount": args.lowcount, "eps": args.eps},
                "corpus": {"users": int(N), "notes": int(len(note_emb))}, "rows": rows}
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
@@ -155,6 +155,8 @@ if __name__ == "__main__":
     p.add_argument("--variant", type=str, default="oracle", choices=["oracle", "s"])
     p.add_argument("--K", type=int, default=1024)
     p.add_argument("--d", type=int, default=32)
+    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1,
+                   help="eps spent DP-selecting the clip bound C (0 = leaky empirical p95)")
     p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
                    help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--M", type=int, default=2000)

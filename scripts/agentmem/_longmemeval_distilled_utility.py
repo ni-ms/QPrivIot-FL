@@ -25,7 +25,7 @@ from huggingface_hub import hf_hub_download
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from _agentmem_probe import (assign_buckets, clip_rows_to_norm, make_projector,  # noqa: E402
+from _agentmem_probe import (assign_buckets, choose_clip, clip_rows_to_norm, make_projector,  # noqa: E402
                             secagg_skellam_release, single_shot_sigma)
 
 _CACHE = Path(__file__).resolve().parents[2] / "experiment_results"
@@ -96,10 +96,10 @@ def run(args):
         uc = [np.zeros(args.K) for _ in range(N)]
         for i in range(len(note_emb)):
             uv[note_user[i]][bucket[i]] += note_emb[i]; uc[note_user[i]][bucket[i]] += 1.0
-        C_v = float(np.percentile([np.linalg.norm(v) for v in uv], 95))
+        C_v = choose_clip([np.linalg.norm(v) for v in uv], seed, args.clip_eps)
         for u in range(N):
             uv[u] = clip_rows_to_norm(uv[u].reshape(1, -1), C_v).reshape(args.K, args.d)
-        B_v = max(float(np.max([np.max(np.abs(v)) for v in uv])), 1e-6)
+        B_v = C_v   # public quantiser bound (B := C never clips)
         nonempty = np.sum(uc, axis=0) > 0.5
 
         valid = target_bucket >= 0
@@ -127,7 +127,7 @@ def run(args):
                 for lab, sigma in sigma_specs]
         out = {"script": "distilled_utility", "metric": f"answer-recall@{args.topk}",
                "chance": args.topk / args.K, "seeds": seeds,
-               "config": {"variant": "oracle", "proj": args.proj, "distilled": Path(args.distilled).stem,
+               "config": {"variant": "oracle", "proj": args.proj, "clip_eps": args.clip_eps, "distilled": Path(args.distilled).stem,
                           "K": args.K, "d": args.d, "topk": args.topk},
                "stats": {"N": int(N), "notes": int(len(note_raw))}, "rows": rows}
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
@@ -140,6 +140,8 @@ if __name__ == "__main__":
     p.add_argument("--distilled", type=str, required=True)
     p.add_argument("--K", type=int, default=64)
     p.add_argument("--d", type=int, default=32)
+    p.add_argument("--clip-eps", dest="clip_eps", type=float, default=0.1,
+                   help="eps spent DP-selecting the clip bound C (0 = leaky empirical p95)")
     p.add_argument("--proj", type=str, default="pca", choices=["pca", "randproj", "publicpca"],
                    help="pca = data-dependent (leaks); randproj = public-seed, zero privacy cost")
     p.add_argument("--topk", type=int, default=5)

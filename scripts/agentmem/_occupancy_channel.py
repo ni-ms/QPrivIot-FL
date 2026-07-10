@@ -3,7 +3,7 @@
 import sys, math, numpy as np
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, ".")
-from sklearn.decomposition import PCA
+sys.path.insert(0, "scripts/agentmem")
 from sklearn.metrics import roc_auc_score
 from qpriviot_fl.privacy_utils import quantize, apply_distributed_skellam_noise, dequantize
 
@@ -34,7 +34,10 @@ def release(per_user, sigma, clip, N):
 z = np.load("experiment_results/_st_lme_oracle.npz", allow_pickle=True)
 E_raw, owner = z["note_emb"], z["note_user"]
 N = int(owner.max()) + 1; d = 32
-E = PCA(n_components=d, random_state=0).fit_transform(E_raw)
+from _agentmem_probe import make_projector, choose_clip
+PROJ = sys.argv[1] if len(sys.argv) > 1 else "randproj"   # match the paper's mechanism (§4)
+E = make_projector(E_raw, d, 0, PROJ)(E_raw)
+E = np.asarray(E, dtype=np.float64)
 E /= np.linalg.norm(E, axis=1, keepdims=True) + 1e-12
 sig_v = 0.606
 rng0 = np.random.default_rng(0)
@@ -45,9 +48,11 @@ print(f"{'K':>6}{'empty% mean+-sd':>20}{'b_max':>8}")
 for K in [32, 64, 128, 256, 512, 1024, 2048]:
     es, bs = [], []
     for sd in range(5):
+        Es = np.asarray(make_projector(E_raw, d, sd, PROJ)(E_raw), dtype=np.float64)
+        Es /= np.linalg.norm(Es, axis=1, keepdims=True) + 1e-12
         r = np.random.default_rng(sd)
         a = r.normal(size=(K, d)); a /= np.linalg.norm(a, axis=1, keepdims=True)
-        b = np.argmax(E @ a.T, axis=1)
+        b = np.argmax(Es @ a.T, axis=1)
         es.append(100 * (np.bincount(b, minlength=K) == 0).mean())
         M = np.zeros((N, K), dtype=bool); M[owner, b] = True
         bs.append(int(M.sum(1).max()))
@@ -66,10 +71,14 @@ for K in [512, 1024, 2048]:
     for i in range(len(E)):
         V[owner[i], b[i]] += E[i]; Cn[owner[i], b[i]] += 1
     true_c = Cn.sum(0); occ = (true_c > 0.5).astype(int)
-    nv = np.linalg.norm(V.reshape(N, -1), axis=1); C_v = float(np.percentile(nv, 95))
-    nc = np.linalg.norm(Cn, axis=1); C_c = float(np.percentile(nc, 95))
+    # Each channel gets a PUBLIC grid at its own scale. Payload norms live in [2,64]; raw-count
+    # norms ||c_u||_2 in [1,32]; indicator norms ||1_u||_2 = sqrt(b_u) <= sqrt(min(n_u,K)) in [1,16].
+    # Re-using the payload grid for the count channels would over-clip them by ~3x and understate
+    # what an occupancy channel can buy.
+    nv = np.linalg.norm(V.reshape(N, -1), axis=1); C_v = choose_clip(nv, 0, 0.1, grid=(2.0, 64.0, 16))
+    nc = np.linalg.norm(Cn, axis=1); C_c = choose_clip(nc, 0, 0.1, grid=(1.0, 32.0, 16))
     Ind = (Cn > 0).astype(float)
-    ni = np.linalg.norm(Ind, axis=1); C_i = float(np.percentile(ni, 95))
+    ni = np.linalg.norm(Ind, axis=1); C_i = choose_clip(ni, 0, 0.1, grid=(1.0, 16.0, 12))
 
     Vc = (V.reshape(N, -1) * np.minimum(1.0, C_v / (nv[:, None] + 1e-12))).reshape(N, K, d)
     S = release(Vc, sig_v, C_v, N)
@@ -88,4 +97,5 @@ for K in [512, 1024, 2048]:
 
 print("\nNOTE: 'norm' is free (post-processing of the already-released S); 'cnt'/'ind' each cost")
 print("      a second RDP composition. Under USER-level DP the indicator channel has L2")
-print("      sensitivity sqrt(b_u) (measured C_c ind ~5), NOT 1 -- but it beats raw counts.")
+print("      sensitivity sqrt(b_u) (true ~5-8; the DP-SELECTED public bound is ~10-12), NOT 1 --
+      but it still beats the raw-count channel at matched eps.")
