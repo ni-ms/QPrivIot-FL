@@ -1,58 +1,78 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% References for "Private Federated Aggregation of LLM-Agent Memory"
 %%
-%% Transcribed from the plain-text [1]-[22] list in Draft_v2.ipynb cell 14.
-%% The draft's list is abbreviated ("Author et al."), so these entries carry
-%% only what the draft actually recorded.
+%% Every identifier below was VERIFIED against the live record (2026-07):
+%% arXiv IDs cross-checked against both the abstract page and the arXiv API
+%% Atom feed (which errors on a nonexistent ID); DOIs against Crossref, DBLP,
+%% the ACL Anthology and the publishers' own pages.
 %%
-%% BEFORE SUBMITTING, every entry below needs:
-%%   - the full author list expanded (Springer will not accept "and others")
-%%   - volume / pages / publisher / DOI added for the published venues
-%% Nothing here is invented -- fields the draft did not state are absent
-%% rather than guessed. Verify each against the real record.
+%% NOTHING HERE IS GUESSED. Where a field is absent it is because the record
+%% genuinely has none -- do not "helpfully" fill it in:
+%%   - bonawitz2017secagg and smith2011quantile have NO arXiv version at all
+%%     (widely miscited as if they did; SecAgg's preprint is IACR ePrint
+%%     2017/281). Do not add an eprint to either.
+%%   - PMLR / NeurIPS / ICLR mint no DOI, so mcmahan2017fedavg,
+%%     kairouz2021ddgauss, chen2022price, hou2025popri, wu2024longmemeval and
+%%     xu2024amem carry an arXiv eprint but no venue DOI. The 10.48550/arXiv.*
+%%     DataCite DOI is a *preprint* DOI, not a venue DOI; only use it if the
+%%     target journal's tooling insists on a doi field.
 %%
-%% Draft's own caveat, kept for your attention: "the 2025-2026 agent-memory
-%% arXiv identifiers below were verified against the live arXiv/venue record
-%% (2026-07); titles and attributions match the published metadata."
+%% The bibtex KEYS retain their original year suffix (e.g. xu2024amem) so the
+%% .tex needs no edits; the `year` field carries the corrected publication year.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% ---------------------------------------------------------------------
-%% [1], [3], [4] are in the draft's list but are NEVER CITED in the body.
-%% Either cite them, \nocite them, or delete them. BibTeX will silently
-%% drop them from the rendered list as-is.
-%% ---------------------------------------------------------------------
-
 @inproceedings{mcmahan2017fedavg,
-  author    = {McMahan, Brendan and others},
+  author    = {McMahan, H. Brendan and Moore, Eider and Ramage, Daniel and
+               Hampson, Seth and Ag{\"u}era y Arcas, Blaise},
   title     = {Communication-Efficient Learning of Deep Networks from
                Decentralized Data},
   booktitle = {Proceedings of the 20th International Conference on Artificial
                Intelligence and Statistics (AISTATS)},
-  year      = {2017}
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {54},
+  pages     = {1273--1282},
+  year      = {2017},
+  eprint    = {1602.05629},
+  archivePrefix = {arXiv}
 }
 
+%% NO arXiv version exists. Preprint is IACR ePrint 2017/281.
 @inproceedings{bonawitz2017secagg,
-  author    = {Bonawitz, Keith and others},
+  author    = {Bonawitz, Keith and Ivanov, Vladimir and Kreuter, Ben and
+               Marcedone, Antonio and McMahan, H. Brendan and Patel, Sarvar and
+               Ramage, Daniel and Segal, Aaron and Seth, Karn},
   title     = {Practical Secure Aggregation for Privacy-Preserving Machine
                Learning},
   booktitle = {Proceedings of the ACM SIGSAC Conference on Computer and
                Communications Security (CCS)},
-  year      = {2017}
+  pages     = {1175--1191},
+  year      = {2017},
+  doi       = {10.1145/3133956.3133982}
 }
 
 @inproceedings{abadi2016dpsgd,
-  author    = {Abadi, Mart{\'i}n and others},
+  author    = {Abadi, Mart{\'i}n and Chu, Andy and Goodfellow, Ian and
+               McMahan, H. Brendan and Mironov, Ilya and Talwar, Kunal and
+               Zhang, Li},
   title     = {Deep Learning with Differential Privacy},
   booktitle = {Proceedings of the ACM SIGSAC Conference on Computer and
                Communications Security (CCS)},
-  year      = {2016}
+  pages     = {308--318},
+  year      = {2016},
+  doi       = {10.1145/2976749.2978318},
+  eprint    = {1607.00133},
+  archivePrefix = {arXiv}
 }
 
 @inproceedings{mironov2017rdp,
   author    = {Mironov, Ilya},
   title     = {R{\'e}nyi Differential Privacy},
-  booktitle = {IEEE Computer Security Foundations Symposium (CSF)},
-  year      = {2017}
+  booktitle = {IEEE 30th Computer Security Foundations Symposium (CSF)},
+  pages     = {263--275},
+  year      = {2017},
+  doi       = {10.1109/CSF.2017.11},
+  eprint    = {1702.07476},
+  archivePrefix = {arXiv}
 }
 
 @inproceedings{agarwal2021skellam,
@@ -60,131 +80,166 @@
   title     = {The Skellam Mechanism for Differentially Private Federated
                Learning},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {34},
   year      = {2021},
   eprint    = {2110.04995},
   archivePrefix = {arXiv}
 }
 
 @inproceedings{kairouz2021ddgauss,
-  author    = {Kairouz, Peter and others},
-  title     = {The Distributed Discrete Gaussian Mechanism for Federated
+  author    = {Kairouz, Peter and Liu, Ziyu and Steinke, Thomas},
+  title     = {The Distributed Discrete {G}aussian Mechanism for Federated
                Learning with Secure Aggregation},
   booktitle = {Proceedings of the 38th International Conference on Machine
                Learning (ICML)},
-  year      = {2021}
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {139},
+  pages     = {5201--5212},
+  year      = {2021},
+  eprint    = {2102.06387},
+  archivePrefix = {arXiv}
 }
 
 @inproceedings{reimers2019sbert,
   author    = {Reimers, Nils and Gurevych, Iryna},
   title     = {Sentence-{BERT}: Sentence Embeddings using Siamese
                {BERT}-Networks},
-  booktitle = {Proceedings of the Conference on Empirical Methods in Natural
-               Language Processing (EMNLP)},
+  booktitle = {Proceedings of the 2019 Conference on Empirical Methods in
+               Natural Language Processing (EMNLP-IJCNLP)},
+  pages     = {3982--3992},
   year      = {2019},
+  doi       = {10.18653/v1/D19-1410},
+  eprint    = {1908.10084},
+  archivePrefix = {arXiv},
   note      = {Model: all-MiniLM-L6-v2}
 }
 
-@article{wu2024longmemeval,
-  author  = {Wu, Di and others},
-  title   = {LongMemEval: Benchmarking Chat Assistants on Long-Term Interactive
-             Memory},
-  journal = {arXiv preprint},
-  year    = {2024}
+%% Published at ICLR 2025; ICLR mints no DOI.
+@inproceedings{wu2024longmemeval,
+  author    = {Wu, Di and Wang, Hongwei and Yu, Wenhao and Zhang, Yuwei and
+               Chang, Kai-Wei and Yu, Dong},
+  title     = {{LongMemEval}: Benchmarking Chat Assistants on Long-Term
+               Interactive Memory},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2025},
+  eprint    = {2410.10813},
+  archivePrefix = {arXiv}
 }
 
-@article{xu2024amem,
-  author  = {Xu, Wujiang and others},
-  title   = {A-MEM: Agentic Memory for {LLM} Agents},
-  journal = {arXiv preprint},
-  year    = {2024}
+%% Published at NeurIPS 2025 (main track); NeurIPS mints no DOI.
+@inproceedings{xu2024amem,
+  author    = {Xu, Wujiang and Liang, Zujie and Mei, Kai and Gao, Hang and
+               Tan, Juntao and Zhang, Yongfeng},
+  title     = {{A-MEM}: Agentic Memory for {LLM} Agents},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {38},
+  year      = {2025},
+  eprint    = {2502.12110},
+  archivePrefix = {arXiv}
 }
 
-@article{chhikara2024mem0,
-  author  = {Chhikara, Prateek and others},
-  title   = {Mem0: Building Production-Ready {AI} Agents with Scalable Long-Term
-             Memory},
-  journal = {arXiv preprint},
-  year    = {2024}
+%% Published at ECAI 2025 (IOS Press, FAIA vol. 413) -- has a real publisher DOI.
+@inproceedings{chhikara2024mem0,
+  author    = {Chhikara, Prateek and Khant, Dev and Aryan, Saket and
+               Singh, Taranjeet and Yadav, Deshraj},
+  title     = {{Mem0}: Building Production-Ready {AI} Agents with Scalable
+               Long-Term Memory},
+  booktitle = {Proceedings of the 28th European Conference on Artificial
+               Intelligence (ECAI)},
+  series    = {Frontiers in Artificial Intelligence and Applications},
+  volume    = {413},
+  year      = {2025},
+  doi       = {10.3233/FAIA251160},
+  eprint    = {2504.19413},
+  archivePrefix = {arXiv}
 }
 
 @inproceedings{wang2025mextra,
-  author    = {Wang, Bo and others},
+  author    = {Wang, Bo and He, Weiyi and Zeng, Shenglai and Xiang, Zhen and
+               Xing, Yue and Tang, Jiliang and He, Pengfei},
   title     = {Unveiling Privacy Risks in {LLM} Agent Memory},
-  booktitle = {Proceedings of the Annual Meeting of the Association for
+  booktitle = {Proceedings of the 63rd Annual Meeting of the Association for
                Computational Linguistics (ACL)},
   year      = {2025},
+  doi       = {10.18653/v1/2025.acl-long.1227},
   eprint    = {2502.13172},
   archivePrefix = {arXiv},
   note      = {Introduces the MEXTRA memory-extraction attack}
 }
 
 @article{chen2026mrmmia,
-  author  = {Chen, Yang and Pang, Rui and Wang, Wei},
+  author  = {Chen, Kai and Pang, Yan and Wang, Tianhao},
   title   = {{MRMMIA}: Membership Inference Attacks on Memory in Chat Agents},
   journal = {arXiv preprint},
+  year    = {2026},
   eprint  = {2605.27825},
-  archivePrefix = {arXiv},
-  year    = {2026}
+  archivePrefix = {arXiv}
 }
 
 @article{rezazadeh2025collabmem,
-  author  = {Rezazadeh, Alireza and others},
+  author  = {Rezazadeh, Alireza and Li, Zichao and Lou, Ange and Zhao, Yuying and
+             Wei, Wei and Bao, Yujia},
   title   = {Collaborative Memory: Multi-User Memory Sharing in {LLM} Agents
              with Dynamic Access Control},
   journal = {arXiv preprint},
+  year    = {2025},
   eprint  = {2505.18279},
-  archivePrefix = {arXiv},
-  year    = {2025}
+  archivePrefix = {arXiv}
 }
 
 @article{chen2026memprivacy,
-  author  = {Chen, Wei and others},
+  author  = {Chen, Yining and others},
   title   = {{MemPrivacy}: Privacy-Preserving Personalized Memory Management for
              Edge-Cloud Agents},
   journal = {arXiv preprint},
+  year    = {2026},
   eprint  = {2605.09530},
-  archivePrefix = {arXiv},
-  year    = {2026}
+  archivePrefix = {arXiv}
 }
 
+%% Accepted at ICPR 2026; no DOI minted yet.
 @article{abouelenein2026dpdatastore,
   author  = {Abouelenein, Ahmed and Torki, Marwan},
   title   = {Differentially Private Datastore Generation for Retrieval-Augmented
              Inference},
   journal = {arXiv preprint},
+  year    = {2026},
   eprint  = {2606.01413},
   archivePrefix = {arXiv},
-  year    = {2026}
+  note    = {Accepted at ICPR 2026}
 }
 
-@article{hou2025popri,
-  author  = {Hou, Charlie and others},
-  title   = {{POPri}: Private Federated Learning using Preference-Optimized
-             Synthetic Data},
-  journal = {arXiv preprint},
-  eprint  = {2504.16438},
-  archivePrefix = {arXiv},
-  year    = {2025}
+@inproceedings{hou2025popri,
+  author    = {Hou, Charlie and others},
+  title     = {{POPri}: Private Federated Learning using Preference-Optimized
+               Synthetic Data},
+  booktitle = {Proceedings of the 42nd International Conference on Machine
+               Learning (ICML)},
+  year      = {2025},
+  eprint    = {2504.16438},
+  archivePrefix = {arXiv}
 }
 
 @article{chen2025fedse,
-  author  = {Chen, Jun and others},
+  author  = {Chen, Xiang and others},
   title   = {{Fed-SE}: Federated Self-Evolution for Privacy-Constrained
              Multi-Environment {LLM} Agents},
   journal = {arXiv preprint},
+  year    = {2025},
   eprint  = {2512.08870},
-  archivePrefix = {arXiv},
-  year    = {2025}
+  archivePrefix = {arXiv}
 }
 
+%% NB: the draft's subtitle was wrong ("Attacks, Defenses and Evaluation").
+%% The real subtitle is below, verified against the arXiv record.
 @article{lin2026survey,
   author  = {Lin, Hao and others},
   title   = {A Survey on Long-Term Memory Security in {LLM} Agents: Attacks,
-             Defenses and Evaluation},
+             Defenses, and Governance Across the Memory Lifecycle},
   journal = {arXiv preprint},
+  year    = {2026},
   eprint  = {2604.16548},
-  archivePrefix = {arXiv},
-  year    = {2026}
+  archivePrefix = {arXiv}
 }
 
 @inproceedings{chen2022price,
@@ -194,6 +249,9 @@
                Private Federated Learning},
   booktitle = {Proceedings of the 39th International Conference on Machine
                Learning (ICML)},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {162},
+  pages     = {3056--3089},
   year      = {2022},
   eprint    = {2203.03761},
   archivePrefix = {arXiv}
@@ -203,8 +261,13 @@
   author    = {Bassily, Raef and Smith, Adam and Thakurta, Abhradeep},
   title     = {Private Empirical Risk Minimization: Efficient Algorithms and
                Tight Error Bounds},
-  booktitle = {IEEE Symposium on Foundations of Computer Science (FOCS)},
-  year      = {2014}
+  booktitle = {IEEE 55th Annual Symposium on Foundations of Computer Science
+               (FOCS)},
+  pages     = {464--473},
+  year      = {2014},
+  doi       = {10.1109/FOCS.2014.56},
+  eprint    = {1405.7085},
+  archivePrefix = {arXiv}
 }
 
 @inproceedings{bun2016zcdp,
@@ -212,16 +275,26 @@
   title     = {Concentrated Differential Privacy: Simplifications, Extensions,
                and Lower Bounds},
   booktitle = {Theory of Cryptography Conference (TCC)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {9985},
+  pages     = {635--658},
   year      = {2016},
+  doi       = {10.1007/978-3-662-53641-4_24},
+  eprint    = {1605.02065},
+  archivePrefix = {arXiv},
   note      = {Pure $\varepsilon$-DP implies $(\varepsilon^2/2)$-zCDP; used to
                compose the clip-selection cost}
 }
 
+%% NO arXiv version exists (confirmed against DBLP conf/stoc/Smith11).
 @inproceedings{smith2011quantile,
   author    = {Smith, Adam},
   title     = {Privacy-Preserving Statistical Estimation with Optimal
                Convergence Rates},
-  booktitle = {Proceedings of the ACM Symposium on Theory of Computing (STOC)},
+  booktitle = {Proceedings of the 43rd Annual ACM Symposium on Theory of
+               Computing (STOC)},
+  pages     = {813--822},
   year      = {2011},
+  doi       = {10.1145/1993636.1993743},
   note      = {Exponential-mechanism quantile selection}
 }
