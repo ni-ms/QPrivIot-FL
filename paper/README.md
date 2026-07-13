@@ -4,11 +4,31 @@ Springer Nature LaTeX template (`sn-jnl.cls` v3.1, December 2024), downloaded
 from Springer's [LaTeX author support](https://www.springernature.com/gp/authors/campaigns/latex-author-support)
 page. This is the template Springer's own submission guidelines point authors to.
 
-**Status: complete and compiling.** 32 pages, 22 references, 16 tables, 5 figures,
+**Status: complete and compiling.** 39 pages, 22 references, 18 tables, 6 figures,
 1 algorithm. `pdflatex -> bibtex -> pdflatex -> pdflatex` produces
-`qpriviot-memory.pdf` with **no errors, no undefined references or citations, and
-no overfull boxes**. The body prose is fully ported from `Draft_v2.ipynb`; the
-`\TODO` markers are gone.
+`qpriviot-memory.pdf` with **no errors and no undefined references or citations**.
+The paper and `ipynb/Draft_v2.ipynb` are kept in sync; `Draft_v2.ipynb` is now the
+**single** notebook mirror (the superseded `Draft.ipynb` was removed). The one
+remaining `TODO` is the author affiliation block, which Springer requires.
+
+### The joint-frontier revision
+
+The paper was restructured after an audit found that **utility and leakage had been
+measured at non-overlapping operating points** — utility only at `K <= 256`, leakage
+only at `K >= 512` — so the abstract's "95% retention" (a `K=32` number) and
+"tail-AUC 0.93 -> 0.53" (a `K >= 512` number) described *disjoint releases*. Filling in
+the missing cells (`scripts/shell/rerun_joint.sh`) showed the gap was an artifact of the
+**weak attack**, not of the mechanism: the uncalibrated cosine proxy reads 0.504 (chance)
+at `K=32` on a release the calibrated LiRA breaks at **AUC 0.833 / TPR@1%FPR 0.175 / 77%
+reconstruction**. DP floors that attack at every `K`, so the recommended `K=32` operating
+point is now defensible on both axes at once (§7.1). Two consequences:
+
+- The **cosine proxy's blindness** is now reported as a result in its own right (§7.5),
+  alongside the data-dependent-projection confound (§7.4).
+- **Repeated release** is now accounted (§5.7): a memory is re-aggregated, and naive
+  re-release costs `eps ~ 93` for a month of daily rounds. The cost is `sqrt(T)` in the
+  noise scale, so a monthly cadence for a year fits inside the same `eps ~ 9.3` at 81%
+  retention.
 
 ## Files
 
