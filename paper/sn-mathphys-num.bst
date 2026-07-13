@@ -2,7 +2,7 @@
 %% Compatible with bibtex version 0.99d.
 %%
 %% Note: Per default sorting entries is done in the order of citation. 
-%% If the journal requires alphabetical order of references, select the “alpha” option
+%% If the journal requires alphabetical order of references, select the ï¿½alphaï¿½ option
 %%
 %% You are free to use this style file as you see fit, provided 
 %% that you do not make changes to the file. 
@@ -2197,6 +2197,16 @@ FUNCTION {inproceedings}
   format.volume output
   publisher.month.pages
   format.date.parens output
+  %% LOCAL PATCH (not upstream Springer): emit the arXiv eprint for conference
+  %% papers too. Stock sn-mathphys-num.bst calls format.eprint only from
+  %% FUNCTION {article}, so every @inproceedings silently dropped its arXiv ID
+  %% and rendered with no link to the preprint.
+  %%
+  %% NB: do NOT also call format.doi / format.url here. end.element -> item.end
+  %% already emits both for every non-misc entry type, so adding them prints the
+  %% DOI twice.
+  format.eprint output
+  format.primaryClass output
   end.element
 }
 
