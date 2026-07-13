@@ -70,13 +70,14 @@ Aggregation of LLM-Agent Memory: Usable Shared Memory with a Measurable
 Leakage-Drop Guarantee under Secure Aggregation and the Skellam Mechanism}
 
 %%=====================================================================%%
-%% TODO(author): uncomment \affil and fill it in before submitting.    %%
-%% Springer will not typeset the paper without an affiliation block.   %%
+%% AFFILIATION: placeholder set to "Independent Researcher" so the      %%
+%% document typesets with no dangling superscript. REPLACE with your    %%
+%% real \orgdiv / \orgname / \city / \country before a Springer         %%
+%% submission (arXiv does not require it).                              %%
 %%=====================================================================%%
 \author*[1]{\fnm{Nikhil} \sur{Sharma}}\email{nikmsharma@gmail.com}
 
-%\affil*[1]{\orgdiv{Department}, \orgname{Institution},
-%\orgaddress{\city{City}, \country{Country}}}
+\affil*[1]{\orgname{Independent Researcher}}
 
 %%=====================================================================%%
 %% ABSTRACT                                                            %%
@@ -206,12 +207,23 @@ most efficient and where our dimension analysis is most credible.
     requires and which our own superseded draft did not do (it reported utility
     only at $K \leq 256$ and leakage only at $K \geq 512$, so its two headline
     numbers described disjoint releases). On the frontier the coarse-$K$ regime is
-    usable \emph{and} safe at one operating point: at $K = 32$ the pool retains
-    \textbf{95\% of clean evidence-recall} at $\eps \approx 9.3$ while a calibrated
-    offline-LiRA attack falls from \textbf{AUC 0.833 / TPR@1\%FPR 0.175} to the
-    \textbf{1\% false-positive floor} (0.011), and a reconstruction-decode attack
-    from 0.771 to 0.396; at $K = 128$ (72\% retention) \emph{both} attacks reach
-    their floor (\secref{sec:frontier}).
+    usable \emph{and} membership-safe at one operating point: at $K = 32$ the pool
+    retains \textbf{95\% of clean evidence-recall} at $\eps \approx 9.3$ while a
+    calibrated offline-LiRA attack falls from \textbf{AUC 0.833 / TPR@1\%FPR 0.175}
+    to the \textbf{1\% false-positive floor} (0.011) --- and it does so at
+    \emph{every} fidelity we measured, so the membership axis is flat in $K$ and
+    $K$ is chosen on utility alone (\secref{sec:frontier}).
+
+  \item \textbf{A negative result about our own metric: closed-set reconstruction is
+    not defeated, and cannot be.} Decode-extraction falls only $0.771 \to 0.396$ at
+    $K = 32$, against a \textbf{measured} chance floor of $0.010$ --- $40\times$ above
+    it. We report this rather than round it away, and then show why the metric is the
+    wrong instrument: it tracks retrieval retention exactly across the sweep, because
+    a centroid that retrieves \emph{must} point at its own bucket, and a closed-set
+    ``hit'' certifies only that a note the adversary already holds falls in a bucket
+    that the \textbf{public} anchors let anyone compute without the release. It is an
+    upper bound on inversion, informative only when low. \textbf{Open-set inversion
+    remains untested and is this paper's chief gap} (\secref{sec:decode-floor}).
 
   \item \textbf{A methodological result: the weak attack the literature defaults
     to is blind exactly where it matters.} The uncalibrated cosine proxy used by
@@ -1128,25 +1140,88 @@ Three readings, all load-bearing.
     bites. \textbf{$K = 32$ is the recommended point}: 95\% retention with the membership
     attack at the floor.
 
-  \item \textbf{Membership and reconstruction do not die at the same $K$, and we say so.}
-    At $K = 32$ the \emph{membership} attack is fully defeated (TPR@1\%FPR $0.175 \to
-    0.011$) but \emph{reconstruction-decode} only halves ($0.771 \to 0.396$, against a
-    noise floor of ${\approx}0.08$ measured at $\eps \approx 1.1$). This is not noise: at
-    coarse $K$ a centroid averages ${\sim}340$ notes, so ``the top-1 decoded note is a
-    true in-bucket member'' remains partly achievable simply because the bucket is large
-    --- the attack recovers a note's \emph{region}, not its owner, and the disclosure is
-    membership in a 340-note bucket rather than identification of a user. It is
-    nonetheless above floor, and a deployment that must defeat reconstruction as well
-    should run at \textbf{$K = 128$}, where decode reaches $0.070$ (at floor) and
-    membership stays at $0.011$, for \textbf{72\% retention}. We report both points rather
-    than quoting the more flattering one.
+  \item \textbf{Membership is defeated everywhere; closed-set reconstruction is not, and
+    that is a statement about the metric.} At $K = 32$ the \emph{membership} attack is
+    fully defeated (TPR@1\%FPR $0.175 \to 0.011$) while \emph{reconstruction-decode} only
+    halves ($0.771 \to 0.396$). We measured what \emph{chance} is for that metric ---
+    scoring it against a \textbf{pure random unit vector}, which carries zero information
+    about the corpus or the release --- and it is $\approx 1/K$: $0.010$ at $K = 32$
+    (Table~\ref{tab:decode-floor}). So the residual sits \textbf{$40\times$ above chance},
+    and we state plainly that \textbf{DP does not defeat closed-set reconstruction at the
+    recommended operating point}. \secref{sec:decode-floor} explains why that is neither
+    surprising nor, on inspection, a disclosure.
 \end{enumerate}
 
-\noindent\textbf{The honest summary of the frontier} is therefore: \emph{the privacy axis
-is free across the whole sweep; pick $K$ for the retrieval fidelity you need, and pay the
-retention it costs.} $K = 32$ if membership is the threat (95\%); $K = 128$ if
-reconstruction is too (72\%). What one may \textbf{not} do --- and what the superseded
-draft did --- is read utility off one end of this table and leakage off the other.
+\noindent\textbf{The honest summary of the frontier} is therefore: \emph{on the membership
+axis --- the one the threat model of \secref{sec:threat} is about --- privacy is free across
+the whole sweep, so pick $K$ for the retrieval fidelity you need and pay the retention it
+costs.} $K = 32$ is our recommendation, at 95\%. What one may \textbf{not} do --- and what the
+superseded draft did --- is read utility off one end of this table and leakage off the other.
+
+\subsection{Closed-set reconstruction is the same signal as retrieval}\label{sec:decode-floor}
+
+The decode column of Table~\ref{tab:frontier} does not go to chance at any $K$ we would
+deploy, and we neither hide that nor explain it away. We instead measure what the metric is
+actually made of, and the answer disqualifies it as an independent privacy axis.
+
+\begin{table}[t]
+  \centering
+  \caption{\textbf{The decode metric's chance floor}, measured by scoring the same attack
+  against a \textbf{pure random unit vector} (zero information about the corpus or the
+  release). Chance is $\approx 1/K$ --- \emph{not} zero --- because a coarse bucket is enormous.
+  Decode under DP tracks \textbf{retention}, not leakage: the two fall together down the sweep.}
+  \label{tab:decode-floor}
+  \small
+  \begin{tabular}{@{}lrrrrr@{}}
+    \toprule
+    $K$ & Notes/bucket & Chance & Decode @ $\eps \approx 9.3$ & $\times$ chance & Retention \\
+    \midrule
+    \textbf{32} & 342 & 0.010 & \textbf{0.396} & $38\times$ & \textbf{95\%} \\
+    64          & 171 & 0.021 & 0.188 & $9\times$ & 86\% \\
+    128         & 86  & 0.010 & 0.070 & $7\times$ & 72\% \\
+    256         & 43  & 0.008 & 0.029 & $4\times$ & 60\% \\
+    512         & 21  & 0.001 & 0.007 & $5\times$ & 41\% \\
+    1024        & 11  & 0.001 & 0.003 & $2\times$ & 24\% \\
+    2048        & 5   & 0.001 & 0.001 & $2\times$ & 13\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Decode and retrieval are the same quantity.} Read the last two columns of
+Table~\ref{tab:decode-floor} together: decode falls $0.396 \to 0.070 \to 0.001$ exactly as
+retention falls $95\% \to 72\% \to 13\%$. This is not a coincidence, it is a tautology. A
+centroid is useful for retrieval \emph{precisely when} it points at the notes in its own
+bucket; ``the nearest note to $\tilde\mu[k]$ lies in bucket $k$'' is a restatement of ``the
+pool retrieves.'' \textbf{One cannot drive closed-set decode to chance without destroying the
+pool}, and $K = 2048$ --- the only row that reaches the floor --- is exactly the row whose
+retention (13\%) makes it worthless. This is the same structure as the occupancy result of
+\secref{sec:occupancy} (\emph{occupancy and membership are the same signal}), and it has the
+same moral: a quantity that is inseparable from utility cannot be independently suppressed.
+
+\paragraph{And a closed-set hit discloses nothing the adversary did not already have.} Recall
+that we run the decode in its \textbf{strongest closed-set form}: the adversary is \emph{handed
+the true candidate note set} and need only pick the right element (\secref{sec:live-agent}).
+Such an adversary already possesses the notes. What a ``hit'' certifies is only that a note
+they already hold falls in bucket $k$ --- and $\mathrm{bucket}(x) = \arg\max_k \langle x, a_k
+\rangle$ is computable by \textbf{anyone}, from the \textbf{public} anchors, \emph{with no
+access to the released pool at all} (\secref{sec:centroid}). The closed-set decode therefore
+measures a quantity that is (i) identical to utility and (ii) available for free without the
+release. It is an \textbf{upper bound} on inversion, and upper bounds are informative in one
+direction only: the low values at $K \geq 1024$ \emph{do} certify that nothing is recoverable
+there, while the high value at $K = 32$ certifies \textbf{nothing at all}.
+
+\paragraph{What this leaves open, stated as an open problem rather than a result.} The
+adversary a vector-only release genuinely must answer to is \textbf{open-set embedding
+inversion}: recovering a note's \emph{text} from a released centroid without being handed the
+candidates (a \texttt{vec2text}-style decoder). \textbf{We do not run that attack}, and we
+therefore do \textbf{not} claim that our release defeats reconstruction. What we claim is
+narrower and, we think, correctly scoped: \emph{membership inference --- the threat this
+mechanism is designed against, and the one the published attacks
+mount~\cite{chen2026mrmmia} --- is driven to the false-positive floor at every fidelity,
+while the closed-set extraction bound is uninformative at usable $K$ for reasons that have
+nothing to do with the privacy of the release.} Establishing open-set inversion resistance is
+the natural next experiment, and we flag it as the most important gap in this paper
+(\secref{sec:discussion}).
 
 \subsection{Calibrated attack: LiRA membership inference and
 extraction}\label{sec:lira}
@@ -1803,19 +1878,26 @@ table above reports. The superseded draft's $0.454$ carried the same confound.
 adversary against the raw baseline would only widen the gap, since our release exposes no text
 either way.)
 
-\paragraph{How to read this.} MEXTRA is a prompt-injection attack that induces an agent to echo
-its \textbf{raw-text} memory. Our release stores no text, so the correct claim is not that we
-\emph{defeat} MEXTRA but that we \textbf{structurally immunise} the agent against it: the attack's
-target object no longer exists. Stating it otherwise would be a strawman, since any vector-only
-datastore inherits the same immunity for free. The adversary that a vector payload genuinely must
-answer to is \textbf{embedding inversion} --- recovering a note from the released centroid. That is
-the reconstruction-decode attack of \secref{sec:lira}, and we run it in its \emph{strongest
-closed-set form}: the adversary is handed the true candidate note set and need only pick the right
-element, which upper-bounds free-form inversion (e.g.\ \texttt{vec2text}-style decoders) on the
-same release. It recovers \textbf{91\%} of clean centroids and \textbf{0.003} under ours.
-\secref{sec:lira}, not this section, is therefore the extraction result that carries weight for our
-mechanism; this section's role is to show what the \emph{status-quo} agent leaks, and that the
-artifact those published attacks consume is simply gone.
+\paragraph{How to read this --- and what it does \emph{not} establish.} MEXTRA is a
+prompt-injection attack that induces an agent to echo its \textbf{raw-text} memory. Our release
+stores no text, so the correct claim is not that we \emph{defeat} MEXTRA but that we
+\textbf{structurally immunise} the agent against it: the attack's target object no longer exists.
+Stating it otherwise would be a strawman, since any vector-only datastore inherits the same
+immunity for free. This section's role is therefore to show what the \emph{status-quo} raw-text
+agent leaks, and that the artifact those published attacks consume is gone --- not to certify our
+release.
+
+The adversary a vector payload genuinely must answer to is \textbf{embedding inversion}:
+recovering a note from the released centroid. \textbf{We do not run that attack.} The
+reconstruction-decode of \secref{sec:lira} is its \emph{closed-set} relaxation --- the adversary
+is handed the true candidate note set and need only pick the right element --- and while that
+upper-bounds free-form inversion (e.g.\ \texttt{vec2text}-style decoders), \secref{sec:decode-floor}
+shows the bound is \textbf{uninformative at every usable $K$}, because it is the same signal as
+retrieval and is satisfied by publicly computable bucket structure. It is therefore evidence
+\emph{against} the release only where it is low ($0.003$ at $K = 1024$), and evidence of nothing
+at $K = 32$ ($0.396$ against a $0.010$ chance floor). \textbf{We consequently make no claim that
+our mechanism defeats extraction}, and identify open-set inversion as the paper's chief open
+problem (\secref{sec:discussion}). What we do claim, and measure, is membership resistance.
 
 \subsection{Occupancy: what the count channel actually
 buys}\label{sec:occupancy}
@@ -1933,25 +2015,49 @@ open model with untuned extraction prompts; a stronger prompt-injection adversar
 close, the gap, since our release exposes no text regardless. A user-level (rather than note-level)
 live-agent attack is left to future work.
 
-\paragraph{Reconstruction and membership do not die together at coarse $K$.} Stated plainly
-because it is the one place the recommended point is not fully clean: at $K = 32$, DP drives
-\emph{membership} to the floor (TPR@1\%FPR $0.175 \to 0.011$) but only halves
-\emph{reconstruction-decode} ($0.771 \to 0.396$, against a ${\approx}0.08$ noise floor). The
-residual is largely a property of the metric at coarse $K$ --- a centroid there averages
-${\sim}340$ notes, so ``the top-1 decode is a true in-bucket member'' is partly satisfiable from
-bucket breadth alone, and the disclosure is region membership rather than user identification ---
-but it is above floor, and we do not round it away. A deployment for which reconstruction is the
-operative threat should run at $K = 128$, where decode reaches its floor ($0.070$) and membership
-stays at it, for 72\% retention instead of 95\% (\secref{sec:frontier}).
+\paragraph{The biggest gap in this paper: we do not test open-set inversion.} Stated first and
+plainly, because it is the limitation most likely to matter. DP drives \emph{membership} to the
+false-positive floor at every fidelity we measured. It does \textbf{not} drive
+\emph{closed-set reconstruction-decode} to chance at any usable $K$: at the recommended
+$K = 32$ decode is $0.396$ against a measured chance floor of $0.010$, i.e.\ $40\times$ above
+it (\secref{sec:decode-floor}). We do not round that away and we do not claim extraction is
+defeated.
 
-\paragraph{Scope: the pool is a routing prior, not a note exchange.} The release is $K$ centroid
-vectors and \textbf{no text}, so a receiving agent cannot read another user's note out of it, and
-we make no such claim (\secref{sec:intro}). Utility is accordingly measured as \emph{routing}
-fidelity --- did the query reach the bucket holding its evidence --- not end-to-end downstream QA;
-extending to generated-answer quality is future work, as is a text-bearing second tier, which would
-need its own budget (\secref{sec:discussion}, ``Stationarity and fidelity''). Retrieval is
-bucket-granular, not exact-note ranking. This is a narrower product than ``every agent inherits
-every fix,'' and it is the one the mechanism can carry under a guarantee.
+We do argue --- and measure --- that the closed-set decode is the \emph{wrong instrument}: it
+falls in lock-step with retrieval retention across the whole sweep because a centroid that
+retrieves \emph{must} point at its own bucket, and a closed-set ``hit'' certifies only that a
+note the adversary already holds falls in a bucket that the \textbf{public} anchors let anyone
+compute without the release. It is an upper bound on inversion, informative only when low. But
+an upper bound that is uninformative is not a defence, and the honest consequence is that
+\textbf{the reconstruction question is open}. Settling it requires an \textbf{open-set
+embedding-inversion attack} (\texttt{vec2text}-style recovery of note text from a released
+centroid), which we do not run. We regard this as the single most important experiment left
+undone, and we would rather say so than let a favourable-looking closed-set number stand in for
+it. A reader who needs reconstruction resistance today, rather than membership resistance,
+should not treat this paper as having supplied it.
+
+\paragraph{Scope: the pool is a routing prior, not a note exchange --- and our benchmarks test
+routing, not downstream question answering.} The release is $K$ centroid vectors and \textbf{no
+text}, so a receiving agent cannot read another user's note out of it, and we make no such claim
+(\secref{sec:intro}). Utility is accordingly measured as \emph{routing} fidelity --- did the query
+reach the bucket holding its evidence --- and \textbf{not} as end-to-end answer quality. We are
+emphatic about this gap because we probed it and it does not close on the benchmark we have. On
+LongMemEval, a local agent (\texttt{qwen2.5:7b}) answering the questions with the private pool in
+its context does \textbf{no better than with no pool at all}, and even a \emph{leaky} raw-text
+shared pool helps only marginally. The reason is structural, not a failure of the mechanism:
+LongMemEval is a \textbf{personal-recall} benchmark --- ``what was the first issue \emph{I} had with
+my car'' --- whose every answer lives in one user's own history, so a \emph{cross-user} pool has no
+relevant knowledge to contribute and merely injects other users' notes. It is exactly the wrong
+benchmark for a shared knowledge prior, and it is the only realistic agent-memory corpus with
+ground-truth queries currently available to us. Demonstrating downstream benefit therefore requires
+a benchmark in which knowledge genuinely \emph{transfers} across users (one agent's hard-won fix
+answering another's question), which to our knowledge does not yet exist; constructing one, and a
+text-bearing second tier to serve it under its own budget (\secref{sec:discussion}, ``Stationarity
+and fidelity''), is the most important piece of future work this paper points to. What we validate
+here is the \textbf{privacy--routing} trade --- that a shared routing prior can be released under a
+guarantee and that the release defeats membership inference --- not the downstream value of routing,
+which our benchmark cannot measure. We would rather state that plainly than let ``routing prior''
+imply an answer-quality result we do not have.
 
 \paragraph{Deployment gaps we specify but do not measure.} Four, stated plainly.
 (i) \textbf{Client dropout:} our runs assume full participation. A naive $\mu/N$ noise share loses
@@ -2043,17 +2149,20 @@ already written up.
 \section{Conclusion}\label{sec:conclusion}
 %%=====================================================================%%
 
-A shared LLM-agent memory pool can be made \textbf{useful and provably private at the same
-operating point} --- a claim that only means anything if both axes are measured there, which is the
-discipline this paper is organised around. Aggregating per-user bucketed memory embeddings under
-Secure Aggregation and the Skellam mechanism yields a curator-free central-DP \textbf{routing prior}:
-$K$ centroid vectors, no text, queryable by any agent in the fleet. On the joint frontier
-(\secref{sec:frontier}) the coarse-$K$ regime is usable and safe together --- at $K = 32$ the pool
-retains \textbf{95\% of clean evidence-recall at $\eps \approx 9.3$} while a calibrated
-likelihood-ratio attack falls from \textbf{AUC 0.833 and a $17\times$-above-floor true-positive rate
-to the 1\% false-positive floor}, and at $K = 128$ (72\% retention) reconstruction reaches its floor
-as well. The privacy axis is \textbf{flat in $K$}: DP defeats the calibrated attack at every fidelity
-we measured, so $K$ is chosen on utility alone. Every parameter of the release is public or
+A shared LLM-agent memory pool can be made \textbf{usable and provably resistant to membership
+inference at the same operating point} --- a claim that only means anything if both axes are measured
+there, which is the discipline this paper is organised around. Aggregating per-user bucketed memory
+embeddings under Secure Aggregation and the Skellam mechanism yields a curator-free central-DP
+\textbf{routing prior}: $K$ centroid vectors, no text, queryable by any agent in the fleet. On the
+joint frontier (\secref{sec:frontier}) the coarse-$K$ regime is usable and safe together --- at
+$K = 32$ the pool retains \textbf{95\% of clean evidence-recall at $\eps \approx 9.3$} while a
+calibrated likelihood-ratio attack falls from \textbf{AUC 0.833 and a $17\times$-above-floor
+true-positive rate to the 1\% false-positive floor}. The membership axis is \textbf{flat in $K$}: DP
+defeats the calibrated attack at every fidelity we measured, so $K$ is chosen on utility alone. We are
+deliberate about the scope of that claim: closed-set \emph{reconstruction} is \textbf{not} driven to
+chance at any usable $K$, and we show why the metric cannot be --- it is the same signal as retrieval
+(\secref{sec:decode-floor}) --- rather than claim a defeat we did not achieve. Open-set inversion
+remains untested and is the paper's chief gap. Every parameter of the release is public or
 DP-accounted, so that $\eps$ is the whole cost --- the discrete mechanism is privacy-free at our
 quantiser resolution, the public-seed projection is privacy-free by construction, the clip bound costs
 0.2\% of the budget, and a vector-only release gives identical retrieval at ${\sim}1.5\times$ tighter
