@@ -17,7 +17,7 @@ no overfull boxes**. The body prose is fully ported from `Draft_v2.ipynb`; the
 | `qpriviot-memory.tex` | The manuscript. |
 | `references.bib` | The 22 references. **Author lists are still abbreviated — expand before submitting.** |
 | `sn-jnl.cls` | Springer's document class. Do not edit. |
-| `sn-mathphys-num.bst` | The bibliography style actually used (copied up from `bst/` so `bibtex` finds it). |
+| `sn-mathphys-num.bst` | The bibliography style actually used (copied up from `bst/` so `bibtex` finds it). **Locally patched** — see below. |
 | `bst/` | The eight Springer bibliography styles. |
 | `reference-sn-article.pdf` | Springer's own compiled sample, for comparison. |
 | `user-manual.pdf` | Springer's template manual. |
@@ -74,6 +74,25 @@ native exe's stderr with `*>` or `2>&1` in a script: PS 5.1 wraps each stderr li
 an ErrorRecord, and MiKTeX's harmless "you have not checked for updates" nag then
 reads as a fatal error. `build.ps1` uses `Start-Process` to sidestep this.)
 
+## Citation links (and a patch to Springer's `.bst`)
+
+Every citation is clickable:
+
+- **In-text** `[n]` markers jump to the bibliography entry (hyperref, via `sn-jnl.cls`).
+- **In the bibliography**, each entry carries a clickable **DOI** or **arXiv** link,
+  rendered by the `.bst` from the `doi` / `eprint` fields in `references.bib`.
+
+The second half needed a fix. Stock `sn-mathphys-num.bst` calls `format.doi`,
+`format.eprint` and `format.url` **only from `FUNCTION {article}`** — so every
+`@inproceedings` entry silently dropped its identifier and rendered with no link at
+all. Since most of the references are conference papers, most of the bibliography
+was dead text. The `sn-mathphys-num.bst` in this directory carries a **local patch**
+(clearly commented, at the tail of `FUNCTION {inproceedings}`) that mirrors
+`article`'s link block. **If you re-copy the style from `bst/`, you lose the patch.**
+
+Springer's production system re-typesets the bibliography from your `.bib`, so this
+patch affects your preprint / submission PDF, not the final published record.
+
 ## What still needs a human
 
 Everything below is an authoring decision, not a defect:
@@ -81,10 +100,14 @@ Everything below is an authoring decision, not a defect:
 1. **Affiliation.** `\affil` is a `Department, Institution, City, Country` stub.
 2. **Funding / acknowledgements.** The Declarations block has a placeholder
    funding statement ("No funding was received") — confirm or replace.
-3. **Reference metadata.** `references.bib` carries only what the draft's
-   plain-text list recorded. Springer will not accept `and others`: expand every
-   author list and add volume / pages / publisher / DOI. Nothing is invented —
-   fields the draft did not state are absent rather than guessed.
+3. **Four remaining `and others` author lists.** Every identifier in
+   `references.bib` is now verified (see below) and 18 of the 22 entries carry a
+   full author list. Four still say `and others` because the full list was not
+   confirmed: `chen2026memprivacy` (first author Yining Chen),
+   `chen2025fedse` (Xiang Chen), `lin2026survey` (Hao Lin), and `hou2025popri`
+   (Charlie Hou). Springer will not accept `and others` — expand these four from
+   their arXiv pages before submitting. Nothing is invented: fields that could not
+   be verified are absent rather than guessed.
 4. **Abstract length.** Now ~250 words with no cross-references or citations, per
    Springer guidance. The draft's original ~600-word version (which cited sections
    and named attacks) is preserved in `Draft_v2.ipynb` cell 0 if you want to mine it.
@@ -119,6 +142,22 @@ These were real errors in `Draft_v2.ipynb`, not artifacts of the port:
    BibTeX would have silently dropped them. Now cited where they belong — FedAvg and
    DP-SGD in the related-work paragraph on federated DP, Mironov where RDP is
    introduced in §5.4. All 22 entries render.
+4. **One reference had the wrong title.** `lin2026survey` was recorded as
+   *"…: Attacks, Defenses and Evaluation"*. The arXiv ID is correct but the real
+   subtitle is *"…: Attacks, Defenses, and Governance Across the Memory Lifecycle"*.
+   Corrected.
+5. **Three references had gone stale as "arXiv preprint".** They are published:
+   `xu2024amem` (A-MEM) is NeurIPS 2025, `wu2024longmemeval` is ICLR 2025, and
+   `chhikara2024mem0` (Mem0) is ECAI 2025 and now has a real publisher DOI
+   (`10.3233/FAIA251160`). Venues and years updated; the bibtex *keys* keep their
+   original year suffix so the `.tex` needed no edits.
+
+   All 22 identifiers were verified against the live record (arXiv abstract page
+   **and** the arXiv API, which errors on a nonexistent ID; DOIs against Crossref,
+   DBLP and the ACL Anthology). The nine 2025–2026 arXiv IDs the draft claimed all
+   resolve to the claimed papers. Two entries genuinely have **no** arXiv version
+   (`bonawitz2017secagg`, `smith2011quantile`) despite being widely miscited as if
+   they did — do not let anyone add one.
 4. **There was no §5.1.** The draft jumped from unnumbered prose to §5.2. A §5.1
    ("Clipping, quantisation, and sensitivity") now closes the gap.
 5. **No author block existed.** Single-author stub added from the repo's git identity.
