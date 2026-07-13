@@ -53,6 +53,17 @@ def load_notes(source, d, seed, proj="pca"):
         from _agentmem_probe import build_embeddings
         Etr, _, Ete, _, _ = build_embeddings(384, seed, "st")  # 384-d raw ST, reduce below
         raw = np.concatenate([Etr, Ete], axis=0)
+    elif source == "distilled":
+        # The REALISTIC agent-memory payload (A-MEM/Mem0-style notes distilled by a local
+        # LLM; paper §7.6). Without this arm, the distilled-payload result would rest only
+        # on the uncalibrated cosine proxy -- the very instrument §7.5 shows to be blind --
+        # so the claim "DP collapses the attack on the realistic payload" would be resting
+        # on an attack we have already disqualified. Cached by _longmemeval_distilled_*.
+        cache = Path(__file__).resolve().parents[2] / "experiment_results" / \
+            "_lme_distilled_oracle_emb.npz"
+        if not cache.exists():
+            raise SystemExit(f"missing {cache}; run _longmemeval_distill.py first")
+        raw = np.load(cache)["emb"]
     else:
         raise ValueError(source)
     raw = raw.astype(np.float32)
@@ -265,7 +276,8 @@ def run(args):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--source", type=str, default="oracle", choices=["oracle", "s", "st"])
+    p.add_argument("--source", type=str, default="oracle",
+                   choices=["oracle", "s", "st", "distilled"])
     p.add_argument("--N", type=int, default=500)
     p.add_argument("--K", type=int, default=1024)
     p.add_argument("--d", type=int, default=32)

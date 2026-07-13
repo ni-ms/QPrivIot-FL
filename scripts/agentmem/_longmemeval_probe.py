@@ -138,7 +138,20 @@ def run(args):
                 b = note_bucket[i]; v[b] += note_emb[i]; c[b] += 1.0
             user_vecs.append(v); user_cnts.append(c)
 
-        nonempty = np.sum(user_cnts, axis=0) > 0.5  # from RAW counts
+        # Occupancy gate (paper §5.3, §7.11). `oracle` suppresses empty buckets using the
+        # CLEAN counts -- a non-private read of the private corpus, i.e. an UNACCOUNTED
+        # release. It is vacuous at K<=256 (no bucket is empty there, so it changes nothing
+        # and the headline numbers are identical either way), but at K>=512 up to 23% of
+        # buckets are empty and the gate would be doing real, unpaid work.
+        #
+        # `none` is the honest default and matches what the leakage path already does: every
+        # bucket is released, so an empty one carries normalized Skellam noise and competes
+        # for top-k on its own merit. Any retrieval number quoted as covered by the reported
+        # eps MUST come from --gate none.
+        if args.gate == "oracle":
+            nonempty = np.sum(user_cnts, axis=0) > 0.5   # clean counts: UNACCOUNTED
+        else:
+            nonempty = np.ones(args.K, dtype=bool)       # release every bucket
         raw_vecs = [v.copy() for v in user_vecs]     # keep raw for the joint path
         raw_cnts = [c.copy() for c in user_cnts]
 
@@ -205,6 +218,11 @@ if __name__ == "__main__":
                    choices=["separate", "joint", "veconly"],
                    help="separate=2 releases; joint=1 concat release; veconly=1 vector-only release")
     p.add_argument("--eps", type=str, default="16,8,3")
+    p.add_argument("--gate", type=str, default="none", choices=["none", "oracle"],
+                   help="occupancy gate. 'none' (default, honest): release every bucket, so an "
+                        "empty one carries pure noise -- this is what the reported eps covers. "
+                        "'oracle': suppress empty buckets using the CLEAN counts, an unaccounted "
+                        "release (vacuous at K<=256, load-bearing at K>=512). See paper 5.3.")
     p.add_argument("--fl_sigma", type=float, default=2.854)
     p.add_argument("--seeds", type=str, default="0,1")
     p.add_argument("--json", type=str, default=None, help="optional path to dump aggregated metrics")
