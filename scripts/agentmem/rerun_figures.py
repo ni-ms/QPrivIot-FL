@@ -23,7 +23,34 @@ FIG = ROOT / "figures"
 FIG.mkdir(exist_ok=True)
 
 EPS_ORDER = ["inf (clean)", "inf", "eps=16", "eps=8", "eps=3", "eps=1"]
-EPS_X = {"inf (clean)": 64.0, "inf": 64.0, "eps=16": 16.0, "eps=8": 8.0, "eps=3": 3.0, "eps=1": 1.0}
+
+# The run labels ("eps=8") are the EXPLORATION budgets: they name the sigma each arm was run
+# at, via the classic Gaussian bound sigma = sqrt(2 ln(1.25/delta))/eps, which is only valid
+# for eps <= 1. The paper reports the RIGOROUS Skellam-RDP eps for that same sigma (paper 5.4),
+# clip-selection cost included. Plot the axis the paper actually claims, not the label the
+# harness happened to run under -- otherwise every figure contradicts every table.
+#
+#   label     sigma    rigorous eps   (skellam_rdp_epsilon, K=32 d=32, delta=1e-5,
+#   eps=16    0.303          22.13     releases=1 vector-only, clip_eps=0.1)
+#   eps=8     0.606           9.31
+#   eps=3     1.615           3.21
+#   eps=1     4.845           1.13
+EPS_X = {"inf (clean)": 64.0, "inf": 64.0,
+         "eps=16": 22.13, "eps=8": 9.31, "eps=3": 3.21, "eps=1": 1.13}
+
+EPS_TICKS = [1.13, 3.21, 9.31, 22.13, 64.0]
+EPS_TICKLABELS = ["1.1", "3.2", "9.3", "22.1", "clean"]
+EPS_XLABEL = "privacy budget $\\varepsilon$ (Skellam RDP, clip selection included)"
+
+
+def _eps_axis(ax, ticks=None):
+    """Log eps axis labelled with the rigorous Skellam-RDP budgets of paper 5.4."""
+    keep = ticks or EPS_TICKS
+    labels = [EPS_TICKLABELS[EPS_TICKS.index(t)] for t in keep]
+    ax.set_xscale("log")
+    ax.set_xticks(keep)
+    ax.set_xticklabels(labels)
+    ax.set_xlabel(EPS_XLABEL)
 
 
 def _val(rows, label, key):
@@ -63,9 +90,8 @@ def fig_utility(data):
         x, y, e = _series(d["rows"], "mean")
         ax.errorbar(x, y, yerr=e, marker="o", capsize=3, label=f"K={K}")
         ax.axhline(d["chance"], color="gray", ls=":", lw=0.6)
-    ax.set_xscale("log"); ax.set_xticks([1, 3, 8, 16, 64])
-    ax.set_xticklabels(["1", "3", "8", "16", "clean"])
-    ax.set_xlabel("privacy budget epsilon (Skellam RDP)"); ax.set_ylabel("evidence-recall@5")
+    _eps_axis(ax)
+    ax.set_ylabel("evidence-recall@5")
     ax.set_title("LongMemEval oracle: DP utility holds at tiny-K")
     ax.legend(title="buckets", fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -82,9 +108,8 @@ def fig_leakage(data):
         x, y, e = _series(d["rows"], "lc_auc_mean")
         ax.errorbar(x, y, yerr=e, marker="s", capsize=3, label=f"K={d['config']['K']}")
     ax.axhline(0.5, color="k", ls="--", lw=0.8, label="chance (no leakage)")
-    ax.set_xscale("log"); ax.set_xticks([1, 3, 8, 16, 64])
-    ax.set_xticklabels(["1", "3", "8", "16", "clean"])
-    ax.set_xlabel("privacy budget epsilon (Skellam RDP)"); ax.set_ylabel("MIA tail-AUC (low-count)")
+    _eps_axis(ax)
+    ax.set_ylabel("MIA tail-AUC (low-count)")
     ax.set_title("LongMemEval oracle: low-count leakage collapses under DP")
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -187,8 +212,8 @@ def fig_distilled_utility(data):
         ax.errorbar(x, y, yerr=e, marker="o", capsize=3,
                     label=f"{scale} K={d['config']['K']}")
     ax.axhline(next(iter(items))[1]["chance"], color="gray", ls=":", lw=0.8, label="chance")
-    ax.set_xscale("log"); ax.set_xticks([3, 8, 16, 64]); ax.set_xticklabels(["3", "8", "16", "clean"])
-    ax.set_xlabel("privacy budget epsilon (Skellam RDP)"); ax.set_ylabel("answer-recall@5")
+    _eps_axis(ax, ticks=[3.21, 9.31, 22.13, 64.0])
+    ax.set_ylabel("answer-recall@5")
     ax.set_title("Distilled-notes utility: density lifts DP retention (500u vs 100u)")
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -213,8 +238,8 @@ def fig_distilled_leakage(data):
         x, y, e = _series(rows, "lc_auc_mean")
         ax.errorbar(x, y, yerr=e, capsize=3, label=f"{src} (tail-AUC)", **style)
     ax.axhline(0.5, color="k", ls="--", lw=0.8, label="chance")
-    ax.set_xscale("log"); ax.set_xticks([3, 8, 16, 64]); ax.set_xticklabels(["3", "8", "16", "clean"])
-    ax.set_xlabel("privacy budget epsilon (Skellam RDP)"); ax.set_ylabel("MIA tail-AUC (low-count)")
+    _eps_axis(ax, ticks=[3.21, 9.31, 22.13, 64.0])
+    ax.set_ylabel("MIA tail-AUC (low-count)")
     ax.set_title(f"Distilled notes leak MORE than raw turns, DP kills both (K={d['config']['K']})")
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
