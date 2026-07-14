@@ -845,7 +845,9 @@ the true counts is a non-private read of the corpus and an \textbf{unaccounted r
 precisely the error \secref{sec:clip} and \secref{sec:crossover} diagnose elsewhere. We
 therefore pay its cost in utility instead of hiding it in the mechanism: every retrieval
 number in this paper is measured with \emph{no} gate (\texttt{--gate none}), which at
-$K \leq 256$ changes nothing (no bucket is empty) and at $K \geq 512$ costs the one or two
+$K \leq 256$ changes nothing (no bucket is empty at $K \leq 128$, and at $K = 256$ at most
+one of 256 is, too few to alter a top-5 ranking: \texttt{--gate oracle} reproduces the
+$K = 256$ column exactly) and at $K \geq 512$ costs the one or two
 points of retention visible in Table~\ref{tab:frontier}. \secref{sec:occupancy} prices what
 a \emph{private} gate would cost, and shows it cannot pay for itself. The implementation is
 \texttt{apply\_distributed\_skellam\_noise} / \texttt{skellam\_noise} /
@@ -1492,7 +1494,8 @@ Table~\ref{tab:leakage} preserves the proxy's numbers for the contrast.
   \centering
   \caption{The uncalibrated cosine proxy (LongMemEval oracle; tail-AUC over buckets with
   $\leq 3$ contributors, $0.5 =$ no leakage). \textbf{Retained for contrast only.} The tail
-  it stratifies on is \emph{empty} at $K \leq 128$, so the proxy has nothing to report at
+  it stratifies on is all but \emph{empty} at $K \leq 128$ (${\leq}0.03\%$ of members, i.e.\
+  a handful of targets, too few to score), so the proxy has nothing to report at
   the recommended operating point, while the calibrated attack of \secref{sec:lira}
   breaks that same release (Table~\ref{tab:frontier}). Reading privacy off this table alone
   is the error \secref{sec:proxy-blind} documents. The ``above chance'' column is computed
@@ -1503,7 +1506,7 @@ Table~\ref{tab:leakage} preserves the proxy's numbers for the contrast.
     \toprule
     $K$ & Tail \% & Clean tail-AUC & $\eps \approx 9.3$ & $\eps \approx 3.2$ & Above chance \\
     \midrule
-    32--128 & \textbf{0\%} & \multicolumn{4}{c@{}}{\emph{tail empty: proxy reports nothing here}} \\
+    32--128 & \textbf{${\leq}0.03\%$} & \multicolumn{4}{c@{}}{\emph{tail all but empty: too few members to score}} \\
     512  & 2\%  & \pmm{0.928}{0.011} & \pmm{0.551}{0.057} & \pmm{0.543}{0.045} & $0.9\sigma$ \\
     1024 & 7\%  & \pmm{\mathbf{0.936}}{\mathbf{0.010}} & \pmm{\mathbf{0.530}}{\mathbf{0.014}} & \pmm{0.499}{0.028} & $2.2\sigma$ \\
     2048 & 16\% & \pmm{0.915}{0.010} & \pmm{0.541}{0.009} & \pmm{0.504}{0.012} & $4.4\sigma$ \\
@@ -1517,8 +1520,8 @@ Table~\ref{tab:leakage} preserves the proxy's numbers for the contrast.
   \caption{The proxy's own endpoint, retained for the record: on the sparse tail it
   \emph{can} see ($K \geq 512$), membership-inference AUC falls from ${\approx}\,0.93$ to
   $0.53$--$0.55$ at $\eps \approx 9.3$. The result is real but the lens is narrow: at
-  $K \leq 128$ this tail is empty and the proxy reports chance, while the calibrated attack
-  of \secref{sec:lira} shows the release is leaking there too
+  $K \leq 128$ this tail is all but empty and the proxy reports chance, while the calibrated
+  attack of \secref{sec:lira} shows the release is leaking there too
   (Fig.~\ref{fig:joint-frontier}b).}
   \label{fig:leakage-drop}
 \end{figure*}
@@ -1752,22 +1755,22 @@ nothing measurable}.
 \end{table*}
 
 \paragraph{The vulnerable tail vanishes.} At this density essentially every bucket has many
-contributors, so the low-count tail ($\leq 3$ contributors) is \textbf{empty (0\% of members)}
-across $K \in \{512, 1024, 2048\}$, and membership inference is \textbf{already at chance
-without DP} (Table~\ref{tab:at-scale-leakage}).
+contributors, so the low-count tail ($\leq 3$ contributors) all but disappears
+(\textbf{${\leq}0.02\%$ of members}) across $K \in \{512, 1024, 2048\}$, and membership
+inference is \textbf{already at chance without DP} (Table~\ref{tab:at-scale-leakage}).
 
 \begin{table*}[t]
   \centering
-  \caption{At-scale leakage (LongMemEval \texttt{s}). The vulnerable tail is empty, and
+  \caption{At-scale leakage (LongMemEval \texttt{s}). The vulnerable tail all but vanishes, and
   membership inference is at chance even on the clean pool.}
   \label{tab:at-scale-leakage}
   \begin{tabular}{@{}lrrr@{}}
     \toprule
     $K$ & Low-count tail \% & Clean all-AUC & $\eps \approx 9.3$ all-AUC \\
     \midrule
-    512  & 0.0\% & 0.508 & 0.508 \\
-    1024 & 0.0\% & 0.519 & 0.505 \\
-    2048 & 0.0\% & 0.529 & 0.502 \\
+    512  & 0.00\% & 0.508 & 0.508 \\
+    1024 & 0.00\% & 0.519 & 0.505 \\
+    2048 & 0.02\% & 0.529 & 0.502 \\
     \bottomrule
   \end{tabular}
 \end{table*}
@@ -1956,8 +1959,8 @@ compares against a population baseline instead of a per-target one. \textbf{The 
 leaks at every fidelity we measured, and DP pins the calibrated attack at the false-positive
 floor at every fidelity we measured}: the privacy axis is flat in $K$, and the operating point
 is chosen on utility alone. The at-scale \texttt{s}-variant (\secref{sec:at-scale}) is a genuine
-boundary on the \emph{proxy}'s tail statistic (with 246k notes the low-count tail is empty), but
-not on the result.
+boundary on the \emph{proxy}'s tail statistic (with 246k notes the low-count tail all but
+vanishes), but not on the result.
 
 \paragraph{Attack strength.} We evaluate at three escalating strengths and the endpoint holds at
 each: (i) an embedding-similarity proxy (\secref{sec:crossover}, \secref{sec:proxy-blind}), which
@@ -2027,7 +2030,8 @@ the sibling of this gap, we now \emph{do} account for and measure: \secref{sec:m
 occupancy suppression, so they contain no oracle; adding a count-reading gate would move every
 tail-AUC by $\leq 0.003$ (\secref{sec:vector-only}). What a dense high-$K$ deployment needs for
 \emph{retrieval} (a private occupancy gate to keep noise-only buckets out of top-$k$) is a real
-cost we do not pay here (we report retrieval only at $K \leq 256$, where no bucket is empty), and
+cost we do not pay here (we report retrieval only at $K \leq 256$, where at most one bucket of
+256 is ever empty and the gate is measurably vacuous), and
 \secref{sec:occupancy} prices it: no rule is simultaneously free and accurate, because occupancy and
 membership are the same signal. Near-empty buckets cannot be \emph{both} privately aggregated and
 privately enumerated. This cost is easier to avoid than to pay:
@@ -2216,8 +2220,9 @@ Active code lives in \texttt{scripts/agentmem/} (see \texttt{scripts/README.md})
     bucket, so an empty one carries normalized Skellam noise; this is the mechanism of
     Algorithm~\ref{alg:main} and it is what every retrieval number in this paper is measured under.
     \texttt{oracle} suppresses empty buckets using the clean counts, a non-private read of the
-    corpus and therefore an unaccounted release. It is vacuous at $K \leq 256$ (identical numbers,
-    since no bucket is empty) and changes only the high-$K$ cells.
+    corpus and therefore an unaccounted release. It reproduces the $K \leq 256$ columns exactly
+    (verified: no bucket is empty at $K \leq 128$, and the at most one empty bucket of 256 at
+    $K = 256$ never enters a top-5 ranking) and changes only the high-$K$ cells.
 \end{itemize}
 
 Run: \texttt{bash scripts/shell/rerun\_final.sh \&\& bash scripts/shell/rerun\_joint.sh \&\& python
