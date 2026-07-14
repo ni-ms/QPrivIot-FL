@@ -79,12 +79,7 @@ Leakage-Drop Guarantee under Secure Aggregation and the Skellam Mechanism}
 
 \affil*[1]{\orgname{Independent Researcher}}
 
-%%=====================================================================%%
-%% ABSTRACT                                                            %%
-%% Springer-compliant rewrite of the draft's ~600-word abstract:       %%
-%% no section cross-references, no citations, no equations, ~250 words.%%
-%% The full original survives as the Introduction + Contributions.     %%
-%%=====================================================================%%
+%% Springer style: no cross-references, citations or equations in the abstract.
 \abstract{LLM agents accumulate per-user memory (distilled notes and
 preferences) that makes them personal and effective. Pooling it across users
 would give a fleet a shared \textbf{routing prior} over what the fleet
@@ -135,23 +130,18 @@ rather than hypothetical: \textbf{MEXTRA}~\cite{wang2025mextra} extracts verbati
 memory content, and \textbf{MRMMIA}~\cite{chen2026mrmmia} performs membership
 inference against agent memory with high success.
 
-\paragraph{What a private pool can and cannot be: a routing prior, not a note
-exchange.} We are precise about the object we release, because it bounds what
-may honestly be claimed for it. The shared pool is $K$ \emph{centroid vectors}
-and \textbf{no text}. A receiving agent therefore cannot read another user's note
-out of it, and we do not claim it can: verbatim knowledge transfer across users
-is \emph{not} what this mechanism delivers, and any mechanism that did deliver it
-would be releasing the very artifact the attacks of \secref{sec:related} consume.
-What the pool \emph{does} deliver is a \textbf{shared routing prior}: a
-fleet-level map of \emph{which regions of memory space hold knowledge}, against
-which any agent can route a query (to the right local memory, the right tool,
-the right public corpus) without any note leaving its device. That is a
-narrower promise than ``every agent inherits every fix,'' and it is the one our
-metric actually measures (evidence-recall: did the query reach the bucket
-containing its evidence?). It is also, we argue, the promise worth keeping: the
-coarse pool is exactly the part of shared memory that \emph{can} be released
-under a guarantee, and \secref{sec:frontier} shows it is released nearly for
-free.
+\paragraph{What the pool is: a routing prior, not a note exchange.}
+The shared pool is $K$ \emph{centroid vectors} and \textbf{no text}. A receiving
+agent cannot read another user's note out of it: verbatim knowledge transfer
+across users is \emph{not} what this mechanism delivers, and any mechanism that
+did deliver it would be releasing the very artifact the attacks of
+\secref{sec:related} consume. What the pool \emph{does} deliver is a
+\textbf{shared routing prior}: a fleet-level map of \emph{which regions of memory
+space hold knowledge}, against which any agent can route a query (to the right
+local memory, the right tool, the right public corpus) without any note leaving
+its device. This is what our metric measures (evidence-recall: did the query
+reach the bucket containing its evidence?), and \secref{sec:frontier} shows the
+coarse pool is released nearly for free.
 
 \paragraph{Why the obvious defenses are insufficient.}
 Access-control layers (\emph{Collaborative Memory}~\cite{rezazadeh2025collabmem})
@@ -203,10 +193,8 @@ most efficient and where our dimension analysis is most credible.
     (\secref{sec:centroid}--\secref{sec:release}).
 
   \item \textbf{A joint utility/leakage frontier, and a positive endpoint on it.}
-    We measure both axes \textbf{at every fidelity $K$}, which a two-axis claim
-    requires and which our own superseded draft did not do (it reported utility
-    only at $K \leq 256$ and leakage only at $K \geq 512$, so its two headline
-    numbers described disjoint releases). On the frontier the coarse-$K$ regime is
+    We measure both axes \textbf{at every fidelity $K$}, which is what a two-axis
+    claim requires. On the frontier the coarse-$K$ regime is
     usable \emph{and} membership-safe at one operating point: at $K = 32$ the pool
     retains \textbf{95\% of clean evidence-recall} at $\eps \approx 9.3$ while a
     calibrated offline-LiRA attack falls from \textbf{AUC 0.833 / TPR@1\%FPR 0.175}
@@ -214,35 +202,32 @@ most efficient and where our dimension analysis is most credible.
     \emph{every} fidelity we measured, so the membership axis is flat in $K$ and
     $K$ is chosen on utility alone (\secref{sec:frontier}).
 
-  \item \textbf{A negative result about our own metric: closed-set reconstruction is
-    not defeated, and cannot be.} Decode-extraction falls only $0.771 \to 0.396$ at
-    $K = 32$, against a \textbf{measured} chance floor of $0.010$, i.e.\ $40\times$ above
-    it. We report this rather than round it away, and then show why the metric is the
-    wrong instrument: it tracks retrieval retention exactly across the sweep, because
-    a centroid that retrieves \emph{must} point at its own bucket, and a closed-set
-    ``hit'' certifies only that a note the adversary already holds falls in a bucket
-    that the \textbf{public} anchors let anyone compute without the release. It is an
-    upper bound on inversion, informative only when low. \textbf{Open-set inversion
-    remains untested and is this paper's chief gap} (\secref{sec:decode-floor}).
+  \item \textbf{Closed-set reconstruction is not defeated, and cannot be.}
+    Decode-extraction falls only $0.771 \to 0.396$ at $K = 32$, against a
+    \textbf{measured} chance floor of $0.010$, i.e.\ $40\times$ above it. The metric is
+    the wrong instrument: it tracks retrieval retention exactly across the sweep,
+    because a centroid that retrieves \emph{must} point at its own bucket, and a
+    closed-set ``hit'' certifies only that a note the adversary already holds falls in
+    a bucket that the \textbf{public} anchors let anyone compute without the release.
+    It is an upper bound on inversion, informative only when low. \textbf{Open-set
+    inversion remains untested and is this paper's chief gap}
+    (\secref{sec:decode-floor}).
 
   \item \textbf{A methodological result: the weak attack the literature defaults
     to is blind exactly where it matters.} The uncalibrated cosine proxy used by
     prior agent-memory work reads \textbf{0.504 (chance) at $K = 32$}, on the
     same clean release the calibrated attack breaks at AUC 0.833. A proxy-only
-    evaluation would therefore have certified a leaking pool as safe, and would
-    have reported (as our superseded draft did) that leakage only exists in a
-    sparse regime nobody would deploy. The endpoint is real; the proxy could not
-    see it (\secref{sec:proxy-blind}).
+    evaluation therefore certifies a leaking pool as safe, and reports that leakage
+    exists only in a sparse regime nobody would deploy (\secref{sec:proxy-blind}).
 
-  \item \textbf{A negative result with teeth: the dimension ``crossover'' is an
-    artifact of data-dependent preprocessing.} Fitting the projection on user
-    notes is an unaccounted release \emph{and} it fabricates the finding that
-    tiny-$d$ is jointly optimal for privacy and utility. Under a data-independent
-    projection the effect \textbf{vanishes on both axes}: no ordering among $d$
-    survives the seed noise on the utility axis, and the pre-DP leakage gradient
-    flattens, with an identity-projection control ($d = 384$) that all three
-    projections must and do agree on (\secref{sec:crossover}). We believe this
-    confound is not specific to this paper.
+  \item \textbf{The dimension ``crossover'' is an artifact of data-dependent
+    preprocessing.} Fitting the projection on user notes is an unaccounted release
+    \emph{and} it fabricates the finding that tiny-$d$ is jointly optimal for privacy
+    and utility. Under a data-independent projection the effect \textbf{vanishes on
+    both axes}: no ordering among $d$ survives the seed noise on the utility axis, and
+    the pre-DP leakage gradient flattens, with an identity-projection control
+    ($d = 384$) that all three projections must and do agree on
+    (\secref{sec:crossover}). The confound is not specific to this paper.
 
   \item \textbf{An end-to-end-accounted mechanism, including repeated release}:
     the projection, the LSH anchors, the clip bound $C$ and the quantiser bound
@@ -270,9 +255,8 @@ most efficient and where our dimension analysis is most credible.
     the LiRA \emph{directly on} LLM-distilled A-MEM/Mem0-style notes (the object
     a production agent actually stores), and the endpoint holds at the same
     operating point and the same budget as on raw turns (clean AUC $0.838$,
-    TPR@1\%FPR $0.171$; both at the floor under DP). The uncalibrated proxy had
-    suggested distilled notes leak \emph{more} than raw turns; calibration shows
-    they do not, and we retract that reading rather than keep the more dramatic one
+    TPR@1\%FPR $0.171$; both at the floor under DP). The uncalibrated proxy suggests
+    distilled notes leak \emph{more} than raw turns; calibration shows they do not
     (\secref{sec:distilled}).
 \end{enumerate}
 
@@ -344,11 +328,10 @@ discrete-DP with a measured attack-drop endpoint.
 That utility degrades with dimension under DP is
 classical~\cite{bassily2014erm} and was sharpened for deep models by Chen et
 al.~\cite{chen2022price}. We do \textbf{not} claim the dimension dependence
-itself. An earlier draft of this work claimed the \emph{coupled} crossover: that
-in agent memory, dimension governs pre-DP \emph{leakage} and DP
-\emph{utility-retention} simultaneously, making tiny-$d$ a joint optimum.
-\secref{sec:crossover} retracts that claim and shows the coupling was an artifact
-of a data-dependent projection.
+itself. \secref{sec:crossover} instead shows that the apparent \emph{coupled}
+crossover, in which dimension governs pre-DP \emph{leakage} and DP
+\emph{utility-retention} simultaneously and so makes tiny-$d$ a joint optimum, is
+an artifact of a data-dependent projection.
 
 %%=====================================================================%%
 \section{Threat Model and Problem Setup}\label{sec:threat}
@@ -378,23 +361,22 @@ downstream agent). It mounts:
     member/non-member \textbf{extraction gap}.
 \end{itemize}
 
-\paragraph{The vulnerable subpopulation, and why it is a lens, not a bound.} It is natural
-to reason that in a \emph{sum} mechanism leakage must concentrate where \textbf{few users
-contribute to a bucket}, since averaging ought to protect well-populated buckets. We therefore
-additionally \emph{stratify} the similarity-proxy metrics by the \textbf{low-count tail} (buckets
-with $\leq 3$ contributors), as the intuitive worst case and the group agent-memory privacy most
+\paragraph{The vulnerable subpopulation is a lens, not a bound.} In a \emph{sum} mechanism
+leakage might be expected to concentrate where \textbf{few users contribute to a bucket},
+since averaging ought to protect well-populated buckets. We therefore additionally
+\emph{stratify} the similarity-proxy metrics by the \textbf{low-count tail} (buckets with
+$\leq 3$ contributors), the intuitive worst case and the group agent-memory privacy most
 obviously cares about (rare/unique notes).
 
-That intuition is, however, \textbf{only true of a weak adversary}, and we flag it here because it
-shaped an earlier version of this work. Averaging dilutes a member's contribution relative to a
-\emph{population} baseline, which is all an uncalibrated cosine score can measure; it does not
-remove the member's influence on the centroid, which is what a \emph{per-target} likelihood ratio
-measures. Our headline attack (the calibrated LiRA of \secref{sec:lira}) is accordingly scored
-\textbf{over all buckets, not the tail}, and it re-identifies members of \emph{dense} coarse-$K$
-buckets that the proxy reports as being at chance (\secref{sec:frontier},
-\secref{sec:proxy-blind}). The tail stratification is thus a property of our \emph{evaluation
-lens}, retained for continuity with the published attacks and for the contrast it draws; it is
-not a claim about where leakage lives, and it is not a bound on where we looked.
+That expectation holds \textbf{only against a weak adversary}. Averaging dilutes a member's
+contribution relative to a \emph{population} baseline, which is all an uncalibrated cosine score
+can measure; it does not remove the member's influence on the centroid, which is what a
+\emph{per-target} likelihood ratio measures. Our headline attack (the calibrated LiRA of
+\secref{sec:lira}) is accordingly scored \textbf{over all buckets, not the tail}, and it
+re-identifies members of \emph{dense} coarse-$K$ buckets that the proxy reports as being at
+chance (\secref{sec:frontier}, \secref{sec:proxy-blind}). The tail stratification is a property
+of our \emph{evaluation lens}, retained for continuity with the published attacks; it is not a
+claim about where leakage lives, and not a bound on where we looked.
 
 \paragraph{Threat boundary (what we do not defend).} Our adversary is
 \textbf{passive}: a recipient of the released pool (the honest-but-curious
@@ -427,11 +409,10 @@ random anchors $a_1, \dots, a_K$ and set
 $\mathrm{bucket}(i) = \arg\max_k \langle e_i, a_k \rangle$. Both $P$ and the
 anchors are drawn from a \textbf{published seed and never touch user data}, so
 shipping them to clients releases nothing and the $\eps$ of
-\secref{sec:accounting} accounts for the \emph{entire} pipeline. This is not a
-detail: a PCA fit on the users' notes (the obvious choice, and the one an
-earlier draft made) is a data-dependent release whose privacy cost is
-unaccounted, and \secref{sec:crossover} shows it also manufactures a spurious
-finding.
+\secref{sec:accounting} accounts for the \emph{entire} pipeline. A PCA fit on the
+users' notes, the obvious alternative, is a data-dependent release whose privacy
+cost is unaccounted, and \secref{sec:crossover} shows it also manufactures a
+spurious finding.
 
 Each user forms, per bucket $k$, a \textbf{sum-vector}
 $v_u[k] = \sum_{i : \mathrm{bucket}(i) = k} e_i$ and a \textbf{count} $c_u[k]$.
@@ -476,8 +457,8 @@ too}\label{sec:clip}
 $C$ and $B$ are shipped to every client. The natural choice ($C =$ the 95th
 percentile of the observed payload norms, $B =$ the largest observed coordinate)
 is a \textbf{function of the private corpus}, so releasing it is an unaccounted
-release, exactly the error \secref{sec:crossover} diagnoses for the projection. An
-earlier draft of this paper made both. We fix both, and neither is expensive.
+release, exactly the error \secref{sec:crossover} diagnoses for the projection.
+Neither is expensive to fix.
 
 \begin{itemize}
   \item \textbf{$B := C$ is free.} Since every note is L2-unit and the payload is
@@ -528,16 +509,6 @@ $0.117$ to $0.100$ at $K = 256$, where the signal-to-noise is thinner. We regard
 the knob: $\eps_c = 0.25$ tightens $C$ to $13.4 \pm 1.3$ and recovers most of the
 loss, at a total $\eps$ of $9.41$ instead of $9.31$.
 
-%% RESOLVED: the draft carried Remark 1 twice with conflicting numbers
-%% (b_max 54 vs 47; eps 9.31->69/159 vs 9.28->69/140; "line 8" vs "line 7").
-%% Re-derived from the harness (5 seeds, randproj, d=32, DP clip):
-%%   b_max over ALL notes = max(20,21,21,20,21) = 21   at K=32
-%%                        = max(47,49,54,48,45) = 54   at K=1024
-%%   (the draft's "47" was the seed-0 value, not the max -- hence the conflict)
-%% and the TRUE eps under per-bucket clipping (noise sized to C, sensitivity
-%% sqrt(b_max)*C) is 68.7 (K=32) and 158.6 (K=1024) against a nominal 9.30.
-%% So version A's numbers were right; version B's line reference was right.
-%% The line number is now a \ref, so it cannot drift again.
 \begin{remark}[Cross-bucket sensitivity: why the clip must be global]
 \label{rem:global-clip}
 Clipping each bucket-vector \emph{separately} to $C$ would \textbf{not} yield
@@ -667,15 +638,14 @@ because no bucket is empty. The sound response to a high-$K$ deployment is to
 (\secref{sec:proxy-blind}, \secref{sec:distilled}, \secref{sec:at-scale}) we release
 the \textbf{vector-only} memory with \emph{no} occupancy suppression:
 $\tilde\mu[k] = \mathrm{normalize}(S[k])$ for every bucket, so an empty bucket carries
-normalized Skellam noise and nothing reads the clean counts. This is the recommended
-mechanism of this section, and it removes the non-private gate an earlier draft used.
-It does not change the conclusion: dropping the gate moves every tail-AUC by
+normalized Skellam noise and nothing reads the clean counts. A non-private gate that
+suppressed empty buckets using the true counts would move every tail-AUC by
 $\leq 0.003$ (5-seed), inside the noise, because a member always occupies its own
-bucket and a non-member in an empty bucket scores against noise either way. But it
-means those tables contain no oracle step. The only clean-count quantity that survives
-is the \textbf{tail \emph{stratification}} ($\leq 3$ contributors), which is a property
-of our \emph{evaluation lens}, not of the release: the adversary never sees it, and it
-selects which rows of results we report rather than what the mechanism emits. The
+bucket and a non-member in an empty bucket scores against noise either way. The only
+clean-count quantity that survives is the \textbf{tail \emph{stratification}}
+($\leq 3$ contributors), a property of our \emph{evaluation lens}, not of the release:
+the adversary never sees it, and it selects which rows of results we report rather
+than what the mechanism emits. The
 occupancy \emph{rule} a dense high-$K$ deployment would need for retrieval is a
 separate question, priced in \secref{sec:occupancy}.
 \end{quote}
@@ -862,8 +832,7 @@ property a continuous-Gaussian datastore lacks under modular arithmetic. Line
 \ref{alg:normalize} releases \textbf{every} bucket, including empty ones: an empty bucket
 therefore emits normalized Skellam noise rather than being suppressed. That is deliberate
 and it is the reason the reported $\eps$ is honest. \emph{Any} occupancy gate that consults
-the true counts (the obvious implementation, and the one an earlier version of our own
-harness used) is a non-private read of the corpus and an \textbf{unaccounted release},
+the true counts is a non-private read of the corpus and an \textbf{unaccounted release},
 precisely the error \secref{sec:clip} and \secref{sec:crossover} diagnose elsewhere. We
 therefore pay its cost in utility instead of hiding it in the mechanism: every retrieval
 number in this paper is measured with \emph{no} gate (\texttt{--gate none}), which at
@@ -1066,15 +1035,12 @@ differences smaller than it.
 
 \subsection{The joint frontier: both axes, one operating point}\label{sec:frontier}
 
-A privacy/utility claim is a claim about \emph{one release}. It is therefore only
-meaningful if both axes are measured at the \textbf{same} operating point, and this
-is precisely the discipline our own superseded draft failed. That draft measured
-utility only at $K \leq 256$ and leakage only at $K \geq 512$: two disjoint grids, from
-which it quoted ``95\% retention'' (a $K = 32$ number) and ``tail-AUC $0.93 \to 0.53$''
-(a $K \geq 512$ number) as though they described a single mechanism. They did not. We
-therefore re-ran the missing cells (utility at $K \geq 512$, and the calibrated attack
-of \secref{sec:lira} at $K \leq 256$) and report the \textbf{joint frontier}
-(Table~\ref{tab:frontier}, Fig.~\ref{fig:joint-frontier}).
+A privacy/utility claim is a claim about \emph{one release}, so it is meaningful only
+if both axes are measured at the \textbf{same} operating point. Quoting a retention
+figure taken at $K = 32$ alongside a leakage figure taken at $K \geq 512$ describes two
+disjoint releases, not one mechanism. We therefore measure utility \emph{and} the
+calibrated attack of \secref{sec:lira} at every $K$, and report the \textbf{joint
+frontier} (Table~\ref{tab:frontier}, Fig.~\ref{fig:joint-frontier}).
 
 \begin{table*}[t]
   \centering
@@ -1119,10 +1085,10 @@ of \secref{sec:lira} at $K \leq 256$) and report the \textbf{joint frontier}
   \caption{\textbf{(a) The joint frontier.} Utility retention falls monotonically with
   fidelity $K$ while clean leakage rises; DP pins the calibrated attack at the 1\%
   false-positive floor \emph{uniformly}, so the frontier is governed by the utility axis
-  alone and the coarse-$K$ regime dominates. \textbf{(b) Why the superseded draft missed
-  this.} The uncalibrated cosine proxy (purple) reports \emph{chance} at $K = 32$ on the
-  same clean release where the calibrated LiRA (red) reads AUC 0.833. The proxy was
-  blind; the pool was not safe (\secref{sec:proxy-blind}).}
+  alone and the coarse-$K$ regime dominates. \textbf{(b) The proxy is blind where it
+  matters.} The uncalibrated cosine proxy (purple) reports \emph{chance} at $K = 32$ on
+  the same clean release where the calibrated LiRA (red) reads AUC 0.833: the pool is
+  not safe there (\secref{sec:proxy-blind}).}
   \label{fig:joint-frontier}
 \end{figure*}
 
@@ -1149,23 +1115,21 @@ Three readings, all load-bearing.
     halves ($0.771 \to 0.396$). We measured what \emph{chance} is for that metric by
     scoring it against a \textbf{pure random unit vector}, which carries zero information
     about the corpus or the release; it is $\approx 1/K$: $0.010$ at $K = 32$
-    (Table~\ref{tab:decode-floor}). So the residual sits \textbf{$40\times$ above chance},
-    and we state plainly that \textbf{DP does not defeat closed-set reconstruction at the
-    recommended operating point}. \secref{sec:decode-floor} explains why that is neither
-    surprising nor, on inspection, a disclosure.
+    (Table~\ref{tab:decode-floor}). The residual therefore sits \textbf{$40\times$ above
+    chance}: \textbf{DP does not defeat closed-set reconstruction at the recommended
+    operating point}. \secref{sec:decode-floor} shows the fault is in the metric, not the
+    release.
 \end{enumerate}
 
-\noindent\textbf{The honest summary of the frontier} is therefore: \emph{on the membership
-axis, the one the threat model of \secref{sec:threat} is about, privacy is free across
-the whole sweep, so pick $K$ for the retrieval fidelity you need and pay the retention it
-costs.} $K = 32$ is our recommendation, at 95\%. What one may \textbf{not} do, and what the
-superseded draft did, is read utility off one end of this table and leakage off the other.
+\noindent\textbf{Summary of the frontier}: \emph{on the membership axis, the one the threat
+model of \secref{sec:threat} is about, privacy is free across the whole sweep, so pick $K$
+for the retrieval fidelity you need and pay the retention it costs.} $K = 32$ is our
+recommendation, at 95\%.
 
 \subsection{Closed-set reconstruction is the same signal as retrieval}\label{sec:decode-floor}
 
 The decode column of Table~\ref{tab:frontier} does not go to chance at any $K$ we would
-deploy, and we neither hide that nor explain it away. We instead measure what the metric is
-actually made of, and the answer disqualifies it as an independent privacy axis.
+deploy. Measuring what the metric is made of disqualifies it as an independent privacy axis.
 
 \begin{table*}[t]
   \centering
@@ -1213,17 +1177,15 @@ release. It is an \textbf{upper bound} on inversion, and upper bounds are inform
 direction only: the low values at $K \geq 1024$ \emph{do} certify that nothing is recoverable
 there, while the high value at $K = 32$ certifies \textbf{nothing at all}.
 
-\paragraph{What this leaves open, stated as an open problem rather than a result.} The
-adversary a vector-only release genuinely must answer to is \textbf{open-set embedding
-inversion}: recovering a note's \emph{text} from a released centroid without being handed the
-candidates (a \texttt{vec2text}-style decoder). \textbf{We do not run that attack}, and we
-therefore do \textbf{not} claim that our release defeats reconstruction. What we claim is
-narrower and, we think, correctly scoped: \emph{membership inference (the threat this
-mechanism is designed against, and the one the published attacks
-mount~\cite{chen2026mrmmia}) is driven to the false-positive floor at every fidelity,
-while the closed-set extraction bound is uninformative at usable $K$ for reasons that have
-nothing to do with the privacy of the release.} Establishing open-set inversion resistance is
-the natural next experiment, and we flag it as the most important gap in this paper
+\paragraph{What this leaves open.} The adversary a vector-only release must answer to is
+\textbf{open-set embedding inversion}: recovering a note's \emph{text} from a released
+centroid without being handed the candidates (a \texttt{vec2text}-style decoder). \textbf{We
+do not run that attack}, and therefore do \textbf{not} claim that our release defeats
+reconstruction. Our claim is narrower: \emph{membership inference (the threat this mechanism
+is designed against, and the one the published attacks mount~\cite{chen2026mrmmia}) is driven
+to the false-positive floor at every fidelity, while the closed-set extraction bound is
+uninformative at usable $K$ for reasons that have nothing to do with the privacy of the
+release.} Establishing open-set inversion resistance is the most important gap in this paper
 (\secref{sec:discussion}).
 
 \subsection{Calibrated attack: LiRA membership inference and
@@ -1299,7 +1261,7 @@ we \emph{looked}.
 On \textbf{real \texttt{all-MiniLM-L6-v2} embeddings} the calibrated attack corroborates
 \secref{sec:crossover}'s negative result: under the data-independent projection clean
 TPR@1\%FPR is nearly \textbf{flat} across dimension, $0.967 \to 0.979$ for $d = 32 \to 384$
-(decode $0.895 \to 0.966$), where the superseded data-PCA grid showed a steep
+(decode $0.895 \to 0.966$), where the data-PCA grid shows a steep
 $0.908 \to 0.979$. Tiny-$d$ buys essentially no leakage reduction once the projection stops
 pre-anonymising the corpus, and DP collapses every cell to chance at $\eps \approx 9.3$
 regardless of $d$ (TPR@1\%FPR $0.011 / 0.010$). (We headline the low-FPR TPR because AUC
@@ -1358,38 +1320,38 @@ Bucketing into $K$ centroids is itself a lossy retriever: on the controls, where
 also computes an un-bucketed nearest-neighbour reference over the same notes, plain kNN scores
 $0.43$--$0.65$ against the clean bucketed pool's $0.19$--$0.32$ ($N = 100$, $K = 32$,
 $d = 32$--$384$). \textbf{Coarse bucketing costs roughly half the retrieval utility, and DP then
-costs a further 5\%.} We state this plainly because the ``95\%'' is otherwise easy to misread as
-``the private pool is 95\% as good as having the notes.''
+costs a further 5\%}: the ``95\%'' does not mean the private pool is 95\% as good as having the
+notes.
 
 That un-bucketed retriever is, however, \textbf{not an available baseline in this setting}: it
 requires every note in the clear at query time, which is precisely the object we may not
 release; it is the artifact MEXTRA consumes (\secref{sec:live-agent}). It is an upper bound,
-not a competitor. The honest framing is therefore: \emph{a releasable shared pool costs about
+not a competitor. In short: \emph{a releasable shared pool costs about
 half of an unreleasable one, and making it differentially private on top of that costs 5\%.}
 Whether the first half is worth paying is a product question about what a fleet-level routing
 prior is worth (\secref{sec:intro}); the second is the question this paper answers.
 
 The $d$-sweep at fixed $K = 128$ shows \textbf{no dimension penalty}: retention is
 \textbf{72\% $\to$ 77\% $\to$ 73\%} for $d = 32 \to 64 \to 128$, flat within seed noise.
-Under the data-dependent PCA this same sweep read $78\% \to 67\% \to 55\%$, which is what
-the superseded draft reported as a dimension effect. \secref{sec:crossover} explains why.
+Under the data-dependent PCA this same sweep reads $78\% \to 67\% \to 55\%$, an apparent
+dimension effect; \secref{sec:crossover} explains why.
 
 \subsection{The dimension ``crossover'' is an artifact of the
 projection}\label{sec:crossover}
 
-An earlier draft of this paper reported a \textbf{dimension/density crossover}: growing
-$d$ appeared to \emph{simultaneously} raise pre-DP leakage and lower DP
-utility-retention, making tiny-$d$ Pareto-preferred and, apparently, a free lunch. That
-finding does not survive an honest projection, and the way it fails is instructive.
+Under a PCA projection \textbf{fit on the users' own notes}, the data shows a
+\textbf{dimension/density crossover}: growing $d$ appears to \emph{simultaneously} raise
+pre-DP leakage and lower DP utility-retention, making tiny-$d$ Pareto-preferred and,
+apparently, a free lunch. The finding does not survive an honest projection, and the way
+it fails is instructive.
 
-The projection $P$ was a PCA \textbf{fit on the users' own notes}. That is a
-data-dependent release: $P$ is handed to every client as a public parameter while being a
-function of private data, so the $\eps$ of \secref{sec:accounting} covered only the second
-stage. We therefore re-ran the entire $d$-sweep under three projections: the original
-\texttt{data-PCA}, a public-seed Gaussian \texttt{randproj}, and \texttt{publicPCA} (PCA
-fit on a disjoint public corpus). \textbf{Everything else is held fixed}, including the
-DP clip bound of \secref{sec:clip}. At $d = 384$ the projection is the \textbf{identity},
-so all three arms must coincide: that is the control, and they do
+A data-fit PCA is a data-dependent release: $P$ is handed to every client as a public
+parameter while being a function of private data, so the $\eps$ of \secref{sec:accounting}
+would cover only the second stage. We therefore run the entire $d$-sweep under three
+projections: \texttt{data-PCA}, a public-seed Gaussian \texttt{randproj}, and
+\texttt{publicPCA} (PCA fit on a disjoint public corpus). \textbf{Everything else is held
+fixed}, including the DP clip bound of \secref{sec:clip}. At $d = 384$ the projection is
+the \textbf{identity}, so all three arms must coincide: that is the control, and they do
 (Tables~\ref{tab:abl-utility} and~\ref{tab:abl-leakage}).
 
 \begin{table*}[t]
@@ -1435,12 +1397,10 @@ Both halves of the crossover dissolve. On the \textbf{utility} axis, tiny-$d$ wi
 data-independent projection that advantage \textbf{disappears into the seed noise}:
 randproj reads $0.151 / 0.178 / 0.158 / 0.161$ and publicPCA $0.147 / 0.150 / 0.142 /
 0.161$ for $d = 32 / 64 / 128 / 384$, spreads of $0.03$ against a 5-seed std of
-$\pm 0.02$--$0.03$. We are deliberately careful here, because it would be easy to
-over-claim in the other direction: the honest statement is \textbf{not} that tiny-$d$
-becomes the \emph{worst} choice (no ordering among $d$ is statistically resolvable at 5
-seeds under either honest projection), but that \textbf{the effect vanishes}. The
-crossover's utility half was manufactured entirely by the leaky projection; what replaces
-it is a flat line, not a reversal. On the \textbf{leakage} axis, the gradient that motivated
+$\pm 0.02$--$0.03$. The claim is \textbf{not} that tiny-$d$ becomes the \emph{worst}
+choice (no ordering among $d$ is statistically resolvable at 5 seeds under either honest
+projection), but that \textbf{the effect vanishes}: what replaces the crossover is a flat
+line, not a reversal. On the \textbf{leakage} axis, the gradient that motivated
 the claim ($0.944 \to 0.989$) likewise flattens to $0.988 \to 0.989$: once the projection
 stops concentrating the corpus's shared variance, small $d$ no longer compresses away what
 makes a note unique. And post-DP, tail-AUC sits at \textbf{0.50--0.55 for every $d$ and
@@ -1459,8 +1419,8 @@ corpus, spent outside the accountant. A random projection, spending nothing, buy
   \includegraphics[width=\linewidth]{fig_projection_ablation.pdf}
   \caption{The dimension crossover is a property of the projection, not of the
   mechanism. \textbf{(a)} Private utility: tiny-$d$ wins only under the
-  data-dependent PCA; under either data-independent projection it is the worst
-  choice. \textbf{(b)} Pre-DP leakage: data-PCA shows the rising gradient the
+  data-dependent PCA; under either data-independent projection its advantage
+  vanishes into the seed noise. \textbf{(b)} Pre-DP leakage: data-PCA shows the rising gradient the
   crossover claim rested on; the honest projections are saturated. All three
   converge at $d = 384$, where the projection \emph{is} the identity: the
   control. Shaded band: post-DP tail-AUC, flat at chance for every $d$ and every
@@ -1477,7 +1437,7 @@ chance). Its private utility ($0.151$) is nominally $15\%$ below the best honest
 ($0.178$ at $d = 64$), but as noted above that gap is inside the seed noise and we do not
 read an ordering from it. The case for tiny-$d$ is therefore a \textbf{communication/compute}
 one (an order-of-magnitude smaller payload for no measurable privacy or utility cost),
-and not the free lunch the superseded draft claimed.
+and not a privacy/utility free lunch.
 
 \paragraph{What this implies beyond this paper.} Data-dependent preprocessing (PCA,
 whitening, vocabulary selection, learned quantisers, clip bounds read off the data;
@@ -1490,10 +1450,9 @@ identity-projection control, of the kind used above, costs one extra run and wou
 The cosine-similarity score of \secref{sec:threat}, which ranks a candidate by
 $\cos(x, \mu[\mathrm{bucket}(x)])$, is the measurement principle of the published
 agent-memory attacks~\cite{wang2025mextra, chen2026mrmmia} and the natural first
-evaluation to reach for. It is also, we now show, \textbf{actively misleading}, and in the
-direction that matters: it under-reports leakage precisely in the coarse-$K$ regime a
-deployment would choose. We report this as a result in its own right, because it is a trap
-we fell into and one the surrounding literature is arranged to fall into.
+evaluation to reach for. It is also \textbf{actively misleading}, and in the direction that
+matters: it under-reports leakage precisely in the coarse-$K$ regime a deployment would
+choose.
 
 \paragraph{The proxy certifies a leaking pool as safe.} Compare the two attacks on the
 \emph{identical clean release} (Table~\ref{tab:frontier}). At $K = 32$ the cosine proxy
@@ -1513,11 +1472,10 @@ proxy's sensitivity grows with $K$ (Table~\ref{tab:frontier}, last column pair: 
 0.738$ as $K$ goes $32 \to 2048$) while the calibrated attack is already strong at $K = 32$
 ($0.833$), a proxy-only evaluation concludes that leakage is a \textbf{sparse, high-$K$,
 low-count-tail phenomenon}, a corner case present only in a regime whose utility
-retention (15--41\%) nobody would ship. That is exactly the conclusion our superseded draft
-drew, and it is wrong twice: it understates the threat at the deployed operating point, and
-it invites the reader to dismiss the mechanism as solving a problem that only exists where
-the system is useless anyway. Table~\ref{tab:leakage} preserves the proxy's numbers for the
-contrast.
+retention (15--41\%) nobody would ship. That conclusion is wrong twice: it understates the
+threat at the deployed operating point, and it invites the reader to dismiss the mechanism
+as solving a problem that only exists where the system is useless anyway.
+Table~\ref{tab:leakage} preserves the proxy's numbers for the contrast.
 
 \begin{table*}[t]
   \centering
@@ -1563,8 +1521,8 @@ floor. So the residual is an artifact of the proxy's weakness in \emph{both} dir
 it sees a signal that buys nothing at high $K$, and misses one that buys plenty at low $K$.
 This is why \secref{sec:frontier} headlines the calibrated low-FPR TPR throughout.
 
-\paragraph{This confound, like the projection, is not specific to us.} \secref{sec:crossover}
-shows a data-dependent \emph{preprocessing} step fabricating a finding; this section shows a
+\paragraph{This confound is not specific to us.} \secref{sec:crossover} shows a
+data-dependent \emph{preprocessing} step fabricating a finding; this section shows an
 under-powered \emph{attack} erasing one. Both are defaults (PCA is the obvious projection,
 cosine-similarity is the obvious membership score), and both bias the conclusion toward
 ``the mechanism is fine.'' An evaluation that reports only an uncalibrated proxy has not
@@ -1643,12 +1601,11 @@ actually store is the one DP protects most decisively.
 \end{figure*}
 
 \paragraph{The calibrated attack on the realistic payload.} Table~\ref{tab:distilled-leakage}
-is a \emph{cosine-proxy} result, and \secref{sec:proxy-blind} has just argued that a
-proxy-only evaluation has not measured privacy, so resting the realistic-payload claim on
-it alone would be exactly the error we indict. We therefore run the \textbf{calibrated LiRA}
-of \secref{sec:lira} directly on the distilled pool, at the recommended operating point
-(Table~\ref{tab:distilled-lira}). It confirms the claim on the instrument that counts, and it
-tells the same story as the raw payload does: the clean distilled pool is thoroughly broken
+is a \emph{cosine-proxy} result, and \secref{sec:proxy-blind} shows that a proxy-only
+evaluation has not measured privacy. We therefore run the \textbf{calibrated LiRA} of
+\secref{sec:lira} directly on the distilled pool, at the recommended operating point
+(Table~\ref{tab:distilled-lira}). It tells the same story as the raw payload does: the clean
+distilled pool is thoroughly broken
 (AUC $0.838$, TPR@1\%FPR $0.171$, i.e.\ $17\times$ the floor, and $75\%$ of centroids decoded to
 a true in-bucket note), and the private release drives it to the floor.
 
@@ -1674,16 +1631,15 @@ a true in-bucket note), and the private release drives it to the floor.
   \end{tabular}
 \end{table*}
 
-Two honest corrections to the proxy's story follow. First, under the calibrated attack the
-distilled payload is \textbf{not} meaningfully leakier than raw turns in the clear (AUC $0.838$
-vs $0.833$; TPR $0.171$ vs $0.175$): the proxy's ``distillation concentrates identifying
-facts'' gradient ($0.68 \to 0.80$ all-AUC) does not survive calibration, and we no longer claim
-it. Second, the distilled payload is if anything \emph{better} protected on the extraction axis
-($0.302$ vs $0.396$ decode at $\eps \approx 9.3$), plausibly because distilled notes are
-semantically denser and less redundant, so a noised centroid is a worse pointer to any one of
-them. What survives, and is the claim worth making, is the one that matters for deployment:
-\textbf{on the payload agents actually store, the calibrated attack is defeated at the same
-operating point and the same budget as on raw turns.}
+Calibration corrects the proxy's story twice. First, the distilled payload is \textbf{not}
+meaningfully leakier than raw turns in the clear (AUC $0.838$ vs $0.833$; TPR $0.171$ vs
+$0.175$): the proxy's ``distillation concentrates identifying facts'' gradient
+($0.68 \to 0.80$ all-AUC) does not survive calibration. Second, the distilled payload is if
+anything \emph{better} protected on the extraction axis ($0.302$ vs $0.396$ decode at
+$\eps \approx 9.3$), plausibly because distilled notes are semantically denser and less
+redundant, so a noised centroid is a worse pointer to any one of them. The claim that matters
+for deployment survives: \textbf{on the payload agents actually store, the calibrated attack is
+defeated at the same operating point and the same budget as on raw turns.}
 
 \subsection{Accounting results}\label{sec:accounting-results}
 
@@ -1719,8 +1675,7 @@ The total $\eps$ decomposes cleanly, and three of its four terms are zero or neg
     of the budget (\secref{sec:clip}), and $B := C$ costs nothing at all. The selection is
     conservative (it over-estimates $C$ by ${\sim}1.6\times$ and therefore over-noises),
     which is what turns $0.416$ into \textbf{0.406} at $K = 32$ and $0.117$ into $0.100$ at
-    $K = 256$. The superseded draft read $C$ and $B$ straight off the private data and
-    charged neither.
+    $K = 256$.
   \item \textbf{Vector-only dominates, at a fixed occupancy rule.} At matched $\sigma$ the
     vector-only release gives \textbf{identical recall to the last decimal} as the
     two-channel design, at $\eps\ 14.0 \to 9.3$, because the count \emph{magnitude} only ever
@@ -1747,14 +1702,10 @@ The total $\eps$ decomposes cleanly, and three of its four terms are zero or neg
 \subsection{Robustness}\label{sec:robustness}
 
 Every number above is a \textbf{5-seed mean with the final (not peak) metric}, reported with
-its std. The refactor that introduced the \texttt{--proj} flag was validated by re-running
-\texttt{--proj pca} and checking it reproduced the previously released grid
-\textbf{bit-identically} (verified on the utility, leakage and distilled paths, to
-$10^{-9}$); the projection is therefore the only variable in the \secref{sec:crossover}
-ablation. The subsequent switch to a DP-selected clip bound (\secref{sec:clip}) changes every
-arm identically. Re-running the full grid at 5 seeds reproduced every qualitative headline
-with \textbf{no sign flip} except the dimension crossover of \secref{sec:crossover}, which
-reversed; that is the point of that section.
+its std. The \texttt{--proj} flag is validated by checking that \texttt{--proj pca} reproduces
+the data-PCA grid \textbf{bit-identically} (utility, leakage and distilled paths, to
+$10^{-9}$), so the projection is the only variable in the \secref{sec:crossover} ablation. The
+DP-selected clip bound (\secref{sec:clip}) changes every arm identically.
 
 \subsection{At-scale generality (LongMemEval \texttt{s}, 246k
 notes)}\label{sec:at-scale}
@@ -1766,8 +1717,8 @@ predicts.
 
 \paragraph{Utility is free.} See Table~\ref{tab:at-scale-utility}. The 100--101\% cells are
 \emph{not} evidence that noise helps: the clean/private differences ($\leq 0.003$) are an
-order of magnitude below the 5-seed std ($0.02$--$0.06$). The honest reading is that at this
-density \textbf{DP costs nothing measurable}.
+order of magnitude below the 5-seed std ($0.02$--$0.06$). At this density \textbf{DP costs
+nothing measurable}.
 
 \begin{table*}[t]
   \centering
@@ -1807,12 +1758,12 @@ without DP} (Table~\ref{tab:at-scale-leakage}).
   \end{tabular}
 \end{table*}
 
-\paragraph{How to read this, corrected.} The superseded draft used this run to argue that the
-leakage-drop is ``really'' a sparse-tail phenomenon, and that the dense regime is therefore
-\emph{safe on both axes for free} because averaging over hundreds of contributors already destroys
-the membership signal. \textbf{That reading was an artifact of the proxy}
-(\secref{sec:proxy-blind}), and we withdraw it. What Table~\ref{tab:at-scale-leakage} shows is that
-the \emph{proxy's tail statistic} vanishes at density, not that the pool stops leaking. The
+\paragraph{How to read this.} It is tempting to read Table~\ref{tab:at-scale-leakage} as showing
+that the leakage-drop is ``really'' a sparse-tail phenomenon, and that the dense regime is
+therefore \emph{safe on both axes for free} because averaging over hundreds of contributors
+already destroys the membership signal. \textbf{That reading is an artifact of the proxy}
+(\secref{sec:proxy-blind}). What the table shows is that the \emph{proxy's tail statistic}
+vanishes at density, not that the pool stops leaking. The
 calibrated attack breaks dense, coarse-$K$ releases: at $K = 32$ on the oracle corpus, where each
 bucket averages ${\sim}340$ contributors and the cosine proxy reads $0.504$, LiRA reads AUC
 $\mathbf{0.833}$ with a $17\times$-above-floor TPR (\secref{sec:frontier}). Averaging does not
@@ -1864,17 +1815,16 @@ centroid pool contains no member text, so verbatim recovery is \emph{structurall
 the agent's context holds only public notes decoded from centroids. The 1.7\% is therefore the
 \textbf{false-positive rate of the recovery detector}: a decoded public note that happens to
 sit within the $0.9$ embedding-similarity threshold of a target member note. It measures our
-measurement, not the release. We report it rather than round it to zero.
+measurement, not the release.
 
 \begin{quote}
-\textbf{A harness bug we found and fixed.} The membership probe originally drew its non-members
-from the same held-out set that served as the adversary's public decode corpus. In
-\texttt{private} mode the agent's context \emph{is} that corpus, so non-member candidates appeared
-verbatim in the context while members never could, and the attack scored \textbf{below} chance
-(MRMMIA-AUC $0.31$--$0.35$; an inverting adversary would have read $0.65$--$0.69$). Any AUC that
-lands reliably below $0.5$ is a design error, not a privacy result. The corpus is now split three
-ways (members / non-members / public decode targets, pairwise disjoint), which is what the
-table above reports. The superseded draft's $0.454$ carried the same confound.
+\textbf{A harness pitfall.} The membership probe must not draw its non-members from the set that
+also serves as the adversary's public decode corpus. In \texttt{private} mode the agent's context
+\emph{is} that corpus, so non-member candidates appear verbatim in the context while members never
+can, and the attack scores \textbf{below} chance (MRMMIA-AUC $0.31$--$0.35$; an inverting adversary
+would read $0.65$--$0.69$). Any AUC that lands reliably below $0.5$ is a design error, not a
+privacy result. The corpus is therefore split three ways (members / non-members / public decode
+targets, pairwise disjoint), which is what the table above reports.
 \end{quote}
 
 (This is a demonstration at modest scale, not a tuned attack sweep; a stronger prompt-injection
@@ -1981,22 +1931,19 @@ channel that cannot pay for itself.
 \section{Discussion and Limitations}\label{sec:discussion}
 %%=====================================================================%%
 
-\paragraph{The endpoint is \emph{not} confined to the sparse tail, and believing it was is
-what a weak attack does to you.} An earlier version of this paper conceded here that the
-$0.9 \to 0.5$ drop ``lives in the low-count tail,'' that dense buckets are protected by
-averaging anyway, and that the result should therefore be framed narrowly as \emph{``DP
-protects the vulnerable tail a sum mechanism most exposes.''} \textbf{We withdraw that
-concession.} It was an artifact of measuring with an uncalibrated cosine proxy, which reports
-chance ($0.504$) at $K = 32$ on a release the calibrated attack breaks at AUC $0.833$ with
-$17\times$-above-floor TPR and 77\% note reconstruction (\secref{sec:frontier},
-\secref{sec:proxy-blind}). Averaging over a coarse bucket does \emph{not} protect its members;
-it only defeats an attacker who compares against a population baseline instead of a per-target
-one. The honest frame is the stronger one: \textbf{the clean pool leaks at every fidelity we
-measured, and DP pins the calibrated attack at the false-positive floor at every fidelity we
-measured}: the privacy axis is flat in $K$, and the operating point is chosen on utility
-alone. The at-scale \texttt{s}-variant (\secref{sec:at-scale}) remains a genuine boundary on the
-\emph{proxy}'s tail statistic (with 246k notes the low-count tail is empty), but it is not, as we
-previously wrote, a boundary on the result.
+\paragraph{The endpoint is \emph{not} confined to the sparse tail.} It is tempting to frame
+the $0.9 \to 0.5$ drop narrowly, as \emph{``DP protects the vulnerable tail a sum mechanism
+most exposes,''} on the grounds that dense buckets are protected by averaging anyway. That
+framing is an artifact of the uncalibrated cosine proxy, which reports chance ($0.504$) at
+$K = 32$ on a release the calibrated attack breaks at AUC $0.833$ with $17\times$-above-floor
+TPR and 77\% note reconstruction (\secref{sec:frontier}, \secref{sec:proxy-blind}). Averaging
+over a coarse bucket does \emph{not} protect its members; it only defeats an attacker who
+compares against a population baseline instead of a per-target one. \textbf{The clean pool
+leaks at every fidelity we measured, and DP pins the calibrated attack at the false-positive
+floor at every fidelity we measured}: the privacy axis is flat in $K$, and the operating point
+is chosen on utility alone. The at-scale \texttt{s}-variant (\secref{sec:at-scale}) is a genuine
+boundary on the \emph{proxy}'s tail statistic (with 246k notes the low-count tail is empty), but
+not on the result.
 
 \paragraph{Attack strength.} We evaluate at three escalating strengths and the endpoint holds at
 each: (i) an embedding-similarity proxy (\secref{sec:crossover}, \secref{sec:proxy-blind}), which
@@ -2011,40 +1958,35 @@ floor against the centroid release (recovery $0.017$, AUC $0.526$). We note that
 at $K = 256$ with 60 users and 883 distilled notes (a smaller and sparser configuration than the
 $K = 32$ operating point of \secref{sec:frontier}, and one for which we report no utility), so it
 should be read as evidence about the \emph{status-quo raw-text} agent, not as a second measurement of
-our recommended release. The endpoint thus \textbf{strengthens} as the attack gets stronger, which is the
-signature one wants: a defence that only survives weak adversaries usually fails on the first
-strong one, and ours does the opposite. Limits of (iii): it is a modest-scale demonstration on one
-open model with untuned extraction prompts; a stronger prompt-injection adversary would widen, not
-close, the gap, since our release exposes no text regardless. A user-level (rather than note-level)
-live-agent attack is left to future work.
+our recommended release. The endpoint therefore \textbf{strengthens} as the attack gets stronger.
+Limits of (iii): it is a modest-scale demonstration on one open model with untuned extraction
+prompts; a stronger prompt-injection adversary would widen, not close, the gap, since our release
+exposes no text regardless. A user-level (rather than note-level) live-agent attack is left to
+future work.
 
-\paragraph{The biggest gap in this paper: we do not test open-set inversion.} Stated first and
-plainly, because it is the limitation most likely to matter. DP drives \emph{membership} to the
-false-positive floor at every fidelity we measured. It does \textbf{not} drive
-\emph{closed-set reconstruction-decode} to chance at any usable $K$: at the recommended
-$K = 32$ decode is $0.396$ against a measured chance floor of $0.010$, i.e.\ $40\times$ above
-it (\secref{sec:decode-floor}). We do not round that away and we do not claim extraction is
-defeated.
+\paragraph{The biggest gap in this paper: we do not test open-set inversion.} DP drives
+\emph{membership} to the false-positive floor at every fidelity we measured. It does
+\textbf{not} drive \emph{closed-set reconstruction-decode} to chance at any usable $K$: at the
+recommended $K = 32$ decode is $0.396$ against a measured chance floor of $0.010$, i.e.\
+$40\times$ above it (\secref{sec:decode-floor}). We do not claim extraction is defeated.
 
 We do argue, and measure, that the closed-set decode is the \emph{wrong instrument}: it
 falls in lock-step with retrieval retention across the whole sweep because a centroid that
 retrieves \emph{must} point at its own bucket, and a closed-set ``hit'' certifies only that a
 note the adversary already holds falls in a bucket that the \textbf{public} anchors let anyone
 compute without the release. It is an upper bound on inversion, informative only when low. But
-an upper bound that is uninformative is not a defence, and the honest consequence is that
-\textbf{the reconstruction question is open}. Settling it requires an \textbf{open-set
-embedding-inversion attack} (\texttt{vec2text}-style recovery of note text from a released
-centroid), which we do not run. We regard this as the single most important experiment left
-undone, and we would rather say so than let a favourable-looking closed-set number stand in for
-it. A reader who needs reconstruction resistance today, rather than membership resistance,
-should not treat this paper as having supplied it.
+an upper bound that is uninformative is not a defence, so \textbf{the reconstruction question is
+open}. Settling it requires an \textbf{open-set embedding-inversion attack}
+(\texttt{vec2text}-style recovery of note text from a released centroid), which we do not run:
+the single most important experiment left undone. A reader who needs reconstruction resistance
+today, rather than membership resistance, should not treat this paper as having supplied it.
 
 \paragraph{Scope: the pool is a routing prior, not a note exchange, and our benchmarks test
 routing, not downstream question answering.} The release is $K$ centroid vectors and \textbf{no
 text}, so a receiving agent cannot read another user's note out of it, and we make no such claim
 (\secref{sec:intro}). Utility is accordingly measured as \emph{routing} fidelity (did the query
-reach the bucket holding its evidence?) and \textbf{not} as end-to-end answer quality. We are
-emphatic about this gap because we probed it and it does not close on the benchmark we have. On
+reach the bucket holding its evidence?) and \textbf{not} as end-to-end answer quality. That gap
+does not close on the benchmark we have. On
 LongMemEval, a local agent (\texttt{qwen2.5:7b}) answering the questions with the private pool in
 its context does \textbf{no better than with no pool at all}, and even a \emph{leaky} raw-text
 shared pool helps only marginally. The reason is structural, not a failure of the mechanism:
@@ -2059,8 +2001,7 @@ text-bearing second tier to serve it under its own budget (\secref{sec:discussio
 and fidelity''), is the most important piece of future work this paper points to. What we validate
 here is the \textbf{privacy--routing} trade: that a shared routing prior can be released under a
 guarantee, and that the release defeats membership inference. What we do not validate is the
-downstream value of routing, which our benchmark cannot measure. We would rather state that plainly
-than let ``routing prior'' imply an answer-quality result we do not have.
+downstream value of routing, which our benchmark cannot measure.
 
 \paragraph{Deployment gaps we specify but do not measure.} Four, stated plainly.
 (i) \textbf{Client dropout:} our runs assume full participation. A naive $\mu/N$ noise share loses
@@ -2069,13 +2010,13 @@ not the nominal $9.3$), so a deployment must use the $M_{\min}$-calibrated share
 noise reconstruction of \secref{sec:dropout}. We specify both; we measure neither. (Repeated release,
 the sibling of this gap, we now \emph{do} account for and measure: \secref{sec:multiround}.)
 (ii) \textbf{Occupancy at high $K$:} the leakage tables release the vector-only pool with \emph{no}
-occupancy suppression, so they contain no oracle; dropping the gate an earlier draft used moves every
+occupancy suppression, so they contain no oracle; adding a count-reading gate would move every
 tail-AUC by $\leq 0.003$ (\secref{sec:vector-only}). What a dense high-$K$ deployment needs for
 \emph{retrieval} (a private occupancy gate to keep noise-only buckets out of top-$k$) is a real
 cost we do not pay here (we report retrieval only at $K \leq 256$, where no bucket is empty), and
 \secref{sec:occupancy} prices it: no rule is simultaneously free and accurate, because occupancy and
-membership are the same signal. The honest reading is that near-empty buckets cannot be \emph{both}
-privately aggregated and privately enumerated. Note this cost is now easier to avoid than to pay:
+membership are the same signal. Near-empty buckets cannot be \emph{both} privately aggregated and
+privately enumerated. This cost is easier to avoid than to pay:
 \secref{sec:frontier} shows the frontier's optimum is at coarse $K$ anyway.
 (iii) \textbf{$\delta$ at production scale:} $\delta = 10^{-5}$ is $200\times$ below $1/N$ at our
 $N = 500$ \textbf{users}, but a $10^{5}$-user fleet must retighten it (\secref{sec:accounting}), at a
@@ -2095,20 +2036,16 @@ final noise addition and silently exclude a data-dependent preprocessing step of
 \secref{sec:crossover} shows to be both leaky \emph{and} distorting, so the numbers are not
 comparable in the direction a reader would assume. Second, the empirical endpoint is what the budget
 is \emph{for}: at this $\eps$, every attack we can mount (including the calibrated LiRA, the
-reconstruction decode, and both published attacks against a live agent) is driven to its floor. We
-report the budget honestly and let the measured attack surface, rather than the number alone, carry
-the claim.
+reconstruction decode, and both published attacks against a live agent) is driven to its floor.
 
-\paragraph{The cost of honesty, and what it buys.} Closing the two unaccounted releases, the
+\paragraph{What the accounted pipeline costs.} Closing the two unaccounted releases, the
 data-fit projection (\secref{sec:centroid}) and the data-read clip bound (\secref{sec:clip}),
 lowers every clean-utility number in \secref{sec:results} by roughly a quarter ($K = 32$
-evidence-recall $0.577 \to 0.428$) and is the right trade. The $\eps$ of \secref{sec:accounting} now
-covers the whole pipeline; the clip selection costs 0.2\% of it and $B := C$ costs nothing; the
-leakage-drop endpoint (\secref{sec:proxy-blind}) and the calibrated attack (\secref{sec:lira}) both
-get \emph{stronger}, because the discarded PCA had been pre-anonymising the corpus for free. We report
-the superseded data-PCA grid alongside, as the \secref{sec:crossover} ablation, rather than quietly
-deleting it. The one casualty is the dimension crossover, an artifact of the discarded step; we treat
-its refutation as a result (\secref{sec:crossover}) rather than a footnote.
+evidence-recall $0.577 \to 0.428$). In exchange, the $\eps$ of \secref{sec:accounting} covers the
+whole pipeline; the clip selection costs 0.2\% of it and $B := C$ costs nothing; and both the
+leakage-drop endpoint (\secref{sec:proxy-blind}) and the calibrated attack (\secref{sec:lira}) get
+\emph{stronger}, because the data-PCA had been pre-anonymising the corpus for free. The data-PCA
+grid is reported alongside, as the \secref{sec:crossover} ablation.
 
 We have not tried \textbf{DP-PCA} (fitting the projection under its own privacy budget), which is
 the only route we know of that would recover the variance concentration soundly, at the cost of a
@@ -2129,10 +2066,10 @@ routing) is the natural architecture, but the second tier needs its own privacy 
 free. We leave it to future work.
 
 \paragraph{Non-novel components, explicitly.} The dimension dependence of DP is
-classical~\cite{chen2022price, bassily2014erm}. We had claimed a \emph{coupled} manifestation across
-leakage and utility in agent memory; \secref{sec:crossover} retracts that claim and shows the coupling
-was induced by a data-dependent projection. What we now claim on this axis is the refutation and the
-control that exposes it. The SecAgg $+$ Skellam path is prior
+classical~\cite{chen2022price, bassily2014erm}. The apparent \emph{coupled} manifestation across
+leakage and utility in agent memory is induced by a data-dependent projection
+(\secref{sec:crossover}); what we claim on this axis is that refutation and the control that
+exposes it. The SecAgg $+$ Skellam path is prior
 work~\cite{bonawitz2017secagg, agarwal2021skellam, kairouz2021ddgauss}, and the
 LSH-bucketing-plus-DP skeleton overlaps the centralized \emph{DP Datastore
 Generation}~\cite{abouelenein2026dpdatastore} (\secref{sec:related}); the novelty is the
@@ -2140,13 +2077,12 @@ federated/curator-free SecAgg+Skellam composition, the agent-memory payload, the
 its measured attack-drop endpoint, and the two methodological refutations
 (\secref{sec:crossover}, \secref{sec:proxy-blind}).
 
-\paragraph{What we would most like to be checked.} Two claims carry the paper and both are cheap to
-falsify, which we regard as a feature. (i) That the \textbf{cosine proxy is blind at coarse $K$}
-(\secref{sec:proxy-blind}): a single LiRA run at the reader's own operating point settles it, in
-under a minute on CPU. (ii) That the \textbf{data-dependent projection manufactures the dimension
-effect} (\secref{sec:crossover}): an identity-projection control at $d = D$, which all projections
-must agree on, settles that. Both are one extra run. Both, in our case, overturned a result we had
-already written up.
+\paragraph{What we would most like to be checked.} Two claims carry the paper, and both are cheap to
+falsify. (i) That the \textbf{cosine proxy is blind at coarse $K$} (\secref{sec:proxy-blind}): a
+single LiRA run at the reader's own operating point settles it, in under a minute on CPU. (ii) That
+the \textbf{data-dependent projection manufactures the dimension effect} (\secref{sec:crossover}): an
+identity-projection control at $d = D$, which all projections must agree on, settles that. Both are
+one extra run.
 
 %%=====================================================================%%
 \section{Conclusion}\label{sec:conclusion}
@@ -2161,10 +2097,10 @@ joint frontier (\secref{sec:frontier}) the coarse-$K$ regime is usable and safe 
 $K = 32$ the pool retains \textbf{95\% of clean evidence-recall at $\eps \approx 9.3$} while a
 calibrated likelihood-ratio attack falls from \textbf{AUC 0.833 and a $17\times$-above-floor
 true-positive rate to the 1\% false-positive floor}. The membership axis is \textbf{flat in $K$}: DP
-defeats the calibrated attack at every fidelity we measured, so $K$ is chosen on utility alone. We are
-deliberate about the scope of that claim: closed-set \emph{reconstruction} is \textbf{not} driven to
-chance at any usable $K$, and we show why the metric cannot be (it is the same signal as retrieval,
-\secref{sec:decode-floor}), rather than claim a defeat we did not achieve. Open-set inversion
+defeats the calibrated attack at every fidelity we measured, so $K$ is chosen on utility alone. The
+scope of that claim is deliberate: closed-set \emph{reconstruction} is \textbf{not} driven to chance
+at any usable $K$, and we show why the metric cannot be (it is the same signal as retrieval,
+\secref{sec:decode-floor}). Open-set inversion
 remains untested and is the paper's chief gap. Every parameter of the release is public or
 DP-accounted, so that $\eps$ is the whole cost: the discrete mechanism is privacy-free at our
 quantiser resolution, the public-seed projection is privacy-free by construction, the clip bound costs
@@ -2176,9 +2112,9 @@ the same $\eps \approx 9.3$ at 81\% retention} (\secref{sec:multiround}). The en
 payload a production agent actually stores: run directly on LLM-distilled notes, the calibrated attack
 is defeated at the same operating point and the same budget (\secref{sec:distilled}).
 
-We also report \textbf{two negative results we think travel}, both of which overturned findings we had
-already written up, and both of which a single control run would have caught. The dimension/density
-``crossover'' that made tiny-$d$ look like a joint privacy/utility optimum is an artifact of fitting
+We also report \textbf{two negative results that travel}, both of which a single control run would
+have caught. The dimension/density
+``crossover'' that makes tiny-$d$ look like a joint privacy/utility optimum is an artifact of fitting
 the projection on user data, an unaccounted release that flatters the clean baseline and
 pre-anonymises the corpus at once; an identity-projection control catches it
 (\secref{sec:crossover}). And the uncalibrated cosine proxy that agent-memory work reaches for by
@@ -2241,14 +2177,14 @@ Active code lives in \texttt{scripts/agentmem/} (see \texttt{scripts/README.md})
   \item \textbf{Projection (\secref{sec:centroid}, \secref{sec:crossover})}: every script takes
     \texttt{--proj \{randproj,pca,publicpca\}}; \texttt{randproj} is the public-seed,
     data-independent default (\texttt{make\_projector} in \texttt{\_agentmem\_probe.py},
-    \texttt{PUBLIC\_PROJ\_SEED}). \texttt{--proj pca} reproduces the superseded data-dependent grid
+    \texttt{PUBLIC\_PROJ\_SEED}). \texttt{--proj pca} reproduces the data-dependent grid
     \textbf{bit-identically}, which is how the \secref{sec:crossover} ablation isolates the projection
     as the only variable.
   \item \textbf{Clip bound (\secref{sec:clip})}: every script takes \texttt{--clip-eps} (default
     \texttt{0.1}). \texttt{dp\_quantile\_clip} in \texttt{qpriviot\_fl/privacy\_utils.py} is the
     exponential mechanism over the public grid \texttt{PUBLIC\_CLIP\_GRID};
     \texttt{skellam\_rdp\_epsilon(..., clip\_eps=, clip\_releases=)} folds its cost into the reported
-    $\eps$. \texttt{--clip-eps 0} reproduces the superseded, unaccounted empirical p95.
+    $\eps$. \texttt{--clip-eps 0} selects the unaccounted empirical p95 instead.
   \item \textbf{Drivers $\to$ tables/figures}: \texttt{scripts/shell/rerun\_final.sh} runs the headline
     5-seed grid into \texttt{experiment\_results/rerun\_grid\_rp/*.json}, the at-scale
     \texttt{s}-variant into \texttt{rerun\_grid\_s\_rp/*.json}, and the two \secref{sec:crossover}
@@ -2256,8 +2192,8 @@ Active code lives in \texttt{scripts/agentmem/} (see \texttt{scripts/README.md})
     the headline except for \texttt{--proj}). \texttt{scripts/shell/rerun\_lira.sh} (with
     \texttt{--proj randproj --clip-eps 0.1}) runs the calibrated-attack grid (\secref{sec:lira}) into
     \texttt{experiment\_results/lira\_rp/*.json}. \texttt{rerun\_figures.py --grid rerun\_grid\_rp}
-    regenerates \texttt{figures/fig\_*}. The superseded grids (\texttt{rerun\_grid},
-    \texttt{rerun\_grid\_s}, \texttt{lira}) are retained only to certify the bit-identical
+    regenerates \texttt{figures/fig\_*}. The data-PCA grids (\texttt{rerun\_grid},
+    \texttt{rerun\_grid\_s}, \texttt{lira}) are retained to certify the bit-identical
     \texttt{--proj pca} check of \secref{sec:robustness}. Each script has an additive \texttt{--json}
     dump; the crypto path is byte-identical to the released \texttt{privacy\_utils}.
   \item \textbf{Occupancy channel (\secref{sec:occupancy})}: \texttt{\_occupancy\_channel.py}.
@@ -2267,7 +2203,7 @@ Active code lives in \texttt{scripts/agentmem/} (see \texttt{scripts/README.md})
     Algorithm~\ref{alg:main} and it is what every retrieval number in this paper is measured under.
     \texttt{oracle} suppresses empty buckets using the clean counts, a non-private read of the
     corpus and therefore an unaccounted release. It is vacuous at $K \leq 256$ (identical numbers,
-    since no bucket is empty) and reproduces the superseded high-$K$ cells.
+    since no bucket is empty) and changes only the high-$K$ cells.
 \end{itemize}
 
 Run: \texttt{bash scripts/shell/rerun\_final.sh \&\& bash scripts/shell/rerun\_joint.sh \&\& python
