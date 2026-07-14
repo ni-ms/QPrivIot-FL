@@ -10,10 +10,12 @@ information about the corpus, zero information about the release -- and scoring 
 
 Two facts fall out, and both are load-bearing for the paper's honesty:
 
-  (1) The floor is ~1/K (0.010 at K=32), NOT the ~0.08 one might read off the strongest-noise
-      row of the LiRA table (which is still an informative release). So decode = 0.396 at
-      K=32 / eps~9.3 sits 40x above chance: reconstruction genuinely SURVIVES DP there, and we
-      do not claim otherwise.
+  (1) The floor is small but NOT zero (measured 0.010 at K=32), and NOT the ~0.08 one might
+      read off the strongest-noise row of the LiRA table (which is still an informative
+      release). So decode = 0.396 at K=32 / eps~9.3 sits 38x above chance: reconstruction
+      genuinely SURVIVES DP there, and we do not claim otherwise. (The floor is only loosely
+      1/K -- at K=32, 1/K = 0.031 while the measured floor is 0.010 -- so we report the
+      MEASURED value and never the 1/K approximation.)
 
   (2) But decode tracks retrieval utility almost exactly across the K-sweep (0.396/95% ->
       0.070/72% -> 0.001/13%), because they are the SAME QUANTITY: a centroid that retrieves
@@ -88,8 +90,9 @@ def main():
         print(f"{K:>6} {len(emb)/K:>10.0f} {floor:>8.3f} {PAPER_DP[K]:>8.3f} {ratio:>8.0f}x "
               f"{PAPER_CLEAN[K]:>7.3f} {PAPER_RETEN[K]:>9d}%")
 
-    print("\n  Chance ~ 1/K. Decode at the recommended K=32 is 40x chance: DP does NOT defeat")
-    print("  reconstruction there, and the paper does not claim it does.")
+    print("\n  Chance is small but nonzero (measured, not 1/K). Decode at the recommended K=32")
+    print("  is 38x chance: DP does NOT defeat reconstruction there, and the paper does not")
+    print("  claim it does.")
     print("  But decode tracks RETENTION down the sweep -- they are the same signal. A centroid")
     print("  that retrieves must point at its own bucket; you cannot floor one without killing")
     print("  the other. And a closed-set hit discloses only the bucket of a note the adversary")
