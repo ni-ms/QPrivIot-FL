@@ -9,15 +9,22 @@ from qpriviot_fl.privacy_utils import quantize, apply_distributed_skellam_noise,
 
 DELTA, QB, RM = 1e-5, 10.0, 1_000_000
 SCALE = RM / QB
+CLIP_EPS = 0.1   # the clip-selection cost, charged once (paper §5.2)
 
 
-def rdp(a, s, dim, clip=1.0, sc=SCALE):
-    mu = (s * clip * sc) ** 2; d2 = clip * sc; d1 = math.sqrt(dim) * d2
+def rdp(a, s, dim):
+    # B := C for every channel (paper §5.2), so Delta_2 = C * (range_max/C) = range_max
+    # exactly, and the per-channel clip bound cancels out of eps entirely.
+    d2 = float(RM)
+    mu = (s * d2) ** 2
+    d1 = math.sqrt(dim) * d2
     return a * d2 * d2 / (2 * mu) + min(((2 * a - 1) * d2 * d2 + 6 * d1) / (4 * mu * mu), 3 * d1 / (2 * mu))
 
 
 def eps_of(ch):
-    return min(sum(rdp(a, s, dm) for s, dm in ch) + math.log(1 / DELTA) / (a - 1) for a in range(2, 4097))
+    """Total eps for a set of (sigma, dim) channels, clip selection included."""
+    return min(sum(rdp(a, s, dm) for s, dm in ch) + a * CLIP_EPS ** 2 / 2
+               + math.log(1 / DELTA) / (a - 1) for a in range(2, 4097))
 
 
 def release(per_user, sigma, clip, N):
@@ -39,7 +46,9 @@ PROJ = sys.argv[1] if len(sys.argv) > 1 else "randproj"   # match the paper's me
 E = make_projector(E_raw, d, 0, PROJ)(E_raw)
 E = np.asarray(E, dtype=np.float64)
 E /= np.linalg.norm(E, axis=1, keepdims=True) + 1e-12
-sig_v = 0.606
+# The exact sigma the grid was run at: the legacy "eps=8" label fixes
+# sigma = sqrt(2 ln(1.25/delta)) / 8. Rounding it to 0.606 shifts the budget by ~0.01.
+sig_v = math.sqrt(2 * math.log(1.25 / DELTA)) / 8
 rng0 = np.random.default_rng(0)
 
 # ── (a) how often are buckets empty?  (paper §7.10a, 5 anchor seeds) ──────────
@@ -60,7 +69,8 @@ for K in [32, 64, 128, 256, 512, 1024, 2048]:
 
 # ── (b) can occupancy be detected privately?  (paper §7.10b) ─────────────────
 print("\n(b) Occupancy DETECTABILITY (AUC: empty vs occupied). 0.5 = undetectable.")
-print("eps_v-only(sigma=0.606) = 9.284\n")
+print(f"eps, vector-only (sigma={sig_v:.4f}, clip selection included) = "
+      f"{eps_of([(sig_v, 1024 * 32)]):.2f}\n")
 print("channels: norm = ‖S[k]‖ vs floor (free); cnt = raw counts; ind = binary user-indicator")
 print(f"{'K':>6}{'empty%':>8}{'C_c cnt':>9}{'C_c ind':>9}{'norm':>7}"
       f"{'cnt@sv':>8}{'ind@sv':>8}{'eps':>7}{'cnt@2':>8}{'ind@2':>8}{'eps':>7}")
@@ -97,5 +107,5 @@ for K in [512, 1024, 2048]:
 
 print("\nNOTE: 'norm' is free (post-processing of the already-released S); 'cnt'/'ind' each cost")
 print("      a second RDP composition. Under USER-level DP the indicator channel has L2")
-print("      sensitivity sqrt(b_u) (true ~5-8; the DP-SELECTED public bound is ~10-12), NOT 1 --
-      but it still beats the raw-count channel at matched eps.")
+print("      sensitivity sqrt(b_u) (true ~5-8; the DP-SELECTED public bound is ~10-12), NOT 1 --")
+print("      but it still beats the raw-count channel at matched eps.")

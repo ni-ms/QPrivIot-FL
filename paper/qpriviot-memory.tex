@@ -204,7 +204,7 @@ most efficient and where our dimension analysis is most credible.
 
   \item \textbf{Closed-set reconstruction is not defeated, and cannot be.}
     Decode-extraction falls only $0.771 \to 0.396$ at $K = 32$, against a
-    \textbf{measured} chance floor of $0.010$, i.e.\ $40\times$ above it. The metric is
+    \textbf{measured} chance floor of $0.010$, i.e.\ $38\times$ above it. The metric is
     the wrong instrument: it tracks retrieval retention exactly across the sweep,
     because a centroid that retrieves \emph{must} point at its own bucket, and a
     closed-set ``hit'' certifies only that a note the adversary already holds falls in
@@ -463,9 +463,9 @@ Neither is expensive to fix.
 \begin{itemize}
   \item \textbf{$B := C$ is free.} Since every note is L2-unit and the payload is
     clipped first, $|V_u[j]| \leq \norm{V_u}_2 \leq C$ for every coordinate $j$. So
-    $B := C$ is a \emph{public} bound that provably never clips a coordinate, and
-    $\eps$ is invariant to $B$ anyway: $\Delta_2 / \sqrt{\mu} = 1/\sigma$
-    regardless of $s = \texttt{range\_max}/B$. Nothing is paid.
+    $B := C$ is a \emph{public} bound that provably never clips a coordinate, and the
+    leading RDP term is invariant to it anyway: $\Delta_2 / \sqrt{\mu} = 1/\sigma$
+    regardless of $s = \texttt{range\_max}/B$ (\secref{sec:accounting}). Nothing is paid.
 
   \item \textbf{$C$ is DP-selected.} We choose $C$ from a public geometric grid
     with the \textbf{exponential mechanism} on the rank utility
@@ -490,7 +490,7 @@ Neither is expensive to fix.
 \end{itemize}
 
 We spend $\eps_c = 0.1$, which costs \textbf{0.2\% of the budget}
-($\eps\ 9.29 \to 9.31$ at $\sigma = 0.606$; \secref{sec:accounting-results}). The
+($\eps\ 9.29 \to 9.31$ at $\sigma = 0.6056$; \secref{sec:accounting-results}). The
 grid is deliberately \textbf{coarse} (16 points spanning $[2, 64]$, a public range:
 a user with $n_u$ unit-norm notes has $\norm{V_u}_2 \in [\sqrt{n_u},\, n_u]$, and
 agent memories hold tens of notes per user), because the exponential mechanism's
@@ -507,7 +507,7 @@ falls from $0.416$ (leaky empirical p95) to $\mathbf{0.406}$ at $K = 32$, and fr
 $0.117$ to $0.100$ at $K = 256$, where the signal-to-noise is thinner. We regard a
 2\% headline utility cost as the correct price for an accounted guarantee, and note
 the knob: $\eps_c = 0.25$ tightens $C$ to $13.4 \pm 1.3$ and recovers most of the
-loss, at a total $\eps$ of $9.41$ instead of $9.31$.
+loss, at a total $\eps$ of $9.42$ instead of $9.31$.
 
 \begin{remark}[Cross-bucket sensitivity: why the clip must be global]
 \label{rem:global-clip}
@@ -548,7 +548,7 @@ accountant assumes and an implementation must honour.
     aggregate noise has standard deviation $\sigma C s$, so it suffices that
     $p > 2\,(N \cdot \texttt{range\_max} + \kappa\,\sigma C s)$ for a tail factor
     $\kappa$ (we use $\kappa = 6$). At our operating point ($N = 500$,
-    $\texttt{range\_max} = 10^{6}$, $\sigma C s = 8.4 \times 10^{5}$) this is
+    $\texttt{range\_max} = 10^{6}$, $\sigma C s = 6.06 \times 10^{5}$) this is
     $p > 10^{9}$. The reference implementation aggregates in \texttt{int64},
     exceeding the bound by nine orders of magnitude; the measured peak coordinate of
     the noised aggregate is $1.8 \times 10^{7}$. (The $\sqrt{d}$ that one might
@@ -565,7 +565,7 @@ accountant assumes and an implementation must honour.
 
   \item \emph{Rounding, and what clipping does to heavy users.} $\mathrm{round}(v s)$
     can lift the integer norm above $C s$ by at most $\sqrt{K d}/2$: at our operating
-    point 16 against $\Delta_2 = 1.39 \times 10^{6}$, a $10^{-5}$ relative inflation,
+    point 16 against $\Delta_2 = 10^{6}$, a $1.6 \times 10^{-5}$ relative inflation,
     which we absorb rather than adopt the conditional randomised rounding
     of~\cite{kairouz2021ddgauss}. Note also that the clip of
     line~\ref{alg:global-clip} is a \textbf{scalar rescale}: it shrinks a heavy
@@ -611,13 +611,13 @@ Three facts make this precise (all measured in \secref{sec:occupancy}):
     sensible variant, since a user contributes $0/1$ per bucket) has L2 sensitivity
     $\sqrt{b_u}$ ($\approx 5$--$8$ here, and its DP-selected public bound lands at
     $9.7$--$12.4$), \textbf{not 1}. The indicator channel is nonetheless the right
-    one: at a full second composition ($\sigma_c = \sigma_v$, $\eps\ 9.31 \to 13.94$)
+    one: at a full second composition ($\sigma_c = \sigma_v$, $\eps\ 9.31 \to 13.95$)
     it detects empty-vs-occupied at AUC $0.87 / 0.76 / 0.70$ for
     $K = 512 / 1024 / 2048$, against $0.82 / 0.68 / 0.63$ for raw counts. Made cheap
-    ($\sigma_c = 2$, $\eps = 9.78$) it falls to $0.72 / 0.59 / 0.55$. Thresholding
+    ($\sigma_c = 2$, $\eps = 9.81$) it falls to $0.72 / 0.59 / 0.55$. Thresholding
     the released vector's own norm $\norm{S[k]}$ against the analytic noise floor
     $\sigma C \sqrt{d}$ is \textbf{free} (post-processing) but is at \textbf{chance}:
-    AUC $0.50 / 0.49 / 0.48$.
+    AUC $0.52 / 0.48 / 0.49$.
 
   \item \textbf{The difficulty is intrinsic, not an implementation shortfall.} At the
     densities where buckets are near-empty, the noise that drives membership inference
@@ -669,7 +669,13 @@ R\'enyi DP~\cite{mironov2017rdp}:
 \end{equation}
 
 with $\mu$ the per-coordinate released variance, $\Delta_2 = C s$, and
-$\Delta_1 \leq \sqrt{d} \cdot \Delta_2$. Composition over releases is additive in
+$\Delta_1 \leq \sqrt{K d} \cdot \Delta_2$ (the $\ell_1$ bound is taken over the
+\emph{whole} $K d$-coordinate payload, because that is the object
+line~\ref{alg:global-clip} clips; see Remark~\ref{rem:global-clip}). Since $B := C$
+forces $\Delta_2 = C s = \texttt{range\_max} = 10^{6}$ exactly, the leading term
+$\alpha \Delta_2^2 / 2\mu = \alpha / 2\sigma^2$ is independent of $C$ and $B$; the
+correction term is not, but it is $O(10^{-4})$ here and never moves the reported
+$\eps$. Composition over releases is additive in
 RDP; we convert to $(\eps, \delta)$ by
 $\eps = \min_\alpha \left[ \mathrm{RDP}(\alpha) + \ln(1/\delta)/(\alpha - 1) \right]$
 ($\delta = 10^{-5}$). This is implemented as \texttt{skellam\_rdp\_epsilon(...)} in
@@ -685,7 +691,10 @@ at the $K = 32$, $d = 32$ operating point.
   $\eps_c = 0.1$ spent DP-selecting the clip bound (\secref{sec:clip}). The projection
   and $B := C$ contribute nothing. The ``classic'' column is the label the exploration
   grid was run under and is \emph{invalid} for $\eps > 1$; it is shown only to map the
-  run labels onto the rigorous budgets.}
+  run labels onto the rigorous budgets. $\sigma$ is given to four decimals because each
+  $\eps$ is computed at the \emph{exact} $\sigma$ the grid was run at
+  ($\sigma = \sqrt{2\ln(1.25/\delta)}\,/\,\text{label}$); rounding $\sigma$ to three
+  decimals first shifts the budget by ${\sim}0.01$.}
   \label{tab:sigma-eps}
   \begin{tabular}{@{}lrrr@{}}
     \toprule
@@ -693,10 +702,10 @@ at the $K = 32$, $d = 32$ operating point.
     \cmidrule(l){2-2}\cmidrule(l){3-4}
     $\sigma$ & (invalid, $\eps > 1$) & \textbf{vector-only (1 rel.)} & two-channel (2 rel.) \\
     \midrule
-    0.303 & 15.99 & 22.11 & 33.31 \\
-    0.606 &  7.99 & \textbf{9.30} & 13.94 \\
-    1.615 &  3.00 & \textbf{3.21} &  4.63 \\
-    2.854 &  1.70 & \textbf{1.81} &  2.56 \\
+    0.3028 & 16.00 & 22.13 & 33.34 \\
+    0.6056 &  8.00 & \textbf{9.31} & 13.95 \\
+    1.6149 &  3.00 & \textbf{3.21} &  4.63 \\
+    2.8540 &  1.70 & \textbf{1.81} &  2.56 \\
     \bottomrule
   \end{tabular}
 \end{table*}
@@ -718,10 +727,10 @@ the safe regime. The requirement \emph{tightens} with the user count rather than
 relaxing, so scale is the stress case, not the reassurance: a production fleet of
 $N = 10^{5}$--$10^{6}$ \textbf{users} would need $\delta \ll 10^{-5}$. Our accountant
 takes $\delta$ as a parameter, and the cost of retightening is mild: at fixed
-$\sigma$, $\eps \approx 9.30 \to 10.07 / 10.84 / 11.44$ for
+$\sigma$, $\eps \approx 9.31 \to 10.08 / 10.85 / 11.45$ for
 $\delta = 10^{-6} / 10^{-7} / 10^{-8}$ (and $\eps \approx 3.21 \to 3.50 / 3.76 / 4.01$).
-Three orders of magnitude in $\delta$ cost \textbf{$< 23\%$ in $\eps$}, so the mechanism
-carries to production-scale $\delta$ without re-tuning.
+Three orders of magnitude in $\delta$ cost \textbf{${\approx}23\%$ in $\eps$}, so the
+mechanism carries to production-scale $\delta$ without re-tuning.
 
 \subsection{The full mechanism}\label{sec:algorithm}
 
@@ -801,8 +810,8 @@ release). Public/shared parameters are as listed in the text above.}
 
   \Statex
   \Statex \textbf{\textsc{Accounting}} \hfill \emph{(\secref{sec:accounting}, exact Skellam-RDP)}
-  \State $\Delta_2 \gets C s$; \; $\Delta_1 \gets \sqrt{d}\,\Delta_2$
-         \Comment{valid \emph{because} line~\ref{alg:global-clip} clips globally}
+  \State $\Delta_2 \gets C s$; \; $\Delta_1 \gets \sqrt{K d}\,\Delta_2$
+         \Comment{over the full $Kd$ payload; valid \emph{because} line~\ref{alg:global-clip} clips globally}
   \State $\eps_{\mathrm{RDP}}(\alpha) = \frac{\alpha \Delta_2^2}{2\mu}
          + \min\!\big\{\frac{(2\alpha - 1)\Delta_2^2 + 6\Delta_1}{4\mu^2},
                        \frac{3\Delta_1}{2\mu}\big\}
@@ -864,7 +873,7 @@ worst exactly when participation is worst (Table~\ref{tab:dropout}).
     \toprule
     survivors $M/N$ & 1.00 & 0.90 & 0.70 & 0.50 & 0.25 \\
     \midrule
-    true $\eps$ (nominal $\eps \approx 9.30$) & 9.30 & 9.91 & 11.61 & \textbf{13.94} & \textbf{22.11} \\
+    true $\eps$ (nominal $\eps \approx 9.31$) & 9.31 & 9.92 & 11.61 & \textbf{13.95} & \textbf{22.13} \\
     true $\eps$ (nominal $\eps \approx 3.21$) & 3.21 & 3.39 &  3.87 & \textbf{4.63}  & \textbf{6.74}  \\
     \bottomrule
   \end{tabular}
@@ -878,8 +887,8 @@ Two sound remedies, either of which restores a valid guarantee:
     turnout $M \geq M_{\min}$ realises variance $(M/M_{\min})\,\mu \geq \mu$: the
     guarantee \textbf{can only improve}, never degrade, and the server \textbf{aborts}
     rather than releasing if $M < M_{\min}$. The price is over-noising on good turnout.
-    With $M_{\min} = N/2$ calibrated to $\eps \approx 9.30$ \emph{at the floor}, a
-    full-turnout round realises $\sigma = 0.857$ and $\eps \approx 6.31$: utility is
+    With $M_{\min} = N/2$ calibrated to $\eps \approx 9.31$ \emph{at the floor}, a
+    full-turnout round realises $\sigma = 0.856$ and $\eps \approx 6.31$: utility is
     paid for at the floor, privacy is banked at the ceiling.
 
   \item \textbf{Fault-tolerant distributed noise generation.} Secret-share each client's
@@ -1114,11 +1123,11 @@ Three readings, all load-bearing.
     fully defeated (TPR@1\%FPR $0.175 \to 0.011$) while \emph{reconstruction-decode} only
     halves ($0.771 \to 0.396$). We measured what \emph{chance} is for that metric by
     scoring it against a \textbf{pure random unit vector}, which carries zero information
-    about the corpus or the release; it is $\approx 1/K$: $0.010$ at $K = 32$
-    (Table~\ref{tab:decode-floor}). The residual therefore sits \textbf{$40\times$ above
-    chance}: \textbf{DP does not defeat closed-set reconstruction at the recommended
-    operating point}. \secref{sec:decode-floor} shows the fault is in the metric, not the
-    release.
+    about the corpus or the release; it is small but \emph{not} zero, and we measure it at
+    $0.010$ at $K = 32$ (Table~\ref{tab:decode-floor}). The residual therefore sits
+    \textbf{$38\times$ above chance}: \textbf{DP does not defeat closed-set reconstruction
+    at the recommended operating point}. \secref{sec:decode-floor} shows the fault is in the
+    metric, not the release.
 \end{enumerate}
 
 \noindent\textbf{Summary of the frontier}: \emph{on the membership axis, the one the threat
@@ -1135,8 +1144,10 @@ deploy. Measuring what the metric is made of disqualifies it as an independent p
   \centering
   \caption{\textbf{The decode metric's chance floor}, measured by scoring the same attack
   against a \textbf{pure random unit vector} (zero information about the corpus or the
-  release). Chance is $\approx 1/K$, \emph{not} zero, because a coarse bucket is enormous.
-  Decode under DP tracks \textbf{retention}, not leakage: the two fall together down the sweep.}
+  release). Chance is small but \emph{not} zero, because a coarse bucket is enormous. The
+  $\times$-chance column is computed from the unrounded floor, so it will not reproduce
+  exactly from the rounded columns printed here. Decode under DP tracks \textbf{retention},
+  not leakage: the two fall together down the sweep.}
   \label{tab:decode-floor}
   \small
   \begin{tabular}{@{}lrrrrr@{}}
@@ -1455,11 +1466,11 @@ matters: it under-reports leakage precisely in the coarse-$K$ regime a deploymen
 choose.
 
 \paragraph{The proxy certifies a leaking pool as safe.} Compare the two attacks on the
-\emph{identical clean release} (Table~\ref{tab:frontier}). At $K = 32$ the cosine proxy
+\emph{identical clean release} (Fig.~\ref{fig:joint-frontier}b). At $K = 32$ the cosine proxy
 reads \textbf{AUC 0.504}, chance to three decimals; on this evidence the pool leaks
 nothing and there is no privacy problem to solve. The calibrated LiRA, on that same
 release, reads \textbf{AUC 0.833, TPR@1\%FPR 0.175 ($17\times$ the floor), and reconstructs
-77\% of centroids to a true in-bucket note.} The pool was never safe. The proxy simply
+77\% of centroids to a true in-bucket note} (Table~\ref{tab:frontier}, $K = 32$). The pool was never safe. The proxy simply
 could not see it, because an uncalibrated cosine score compares a member's similarity
 against a \emph{population} baseline, and at coarse $K$ the population baseline is high:
 every candidate is close to a centroid that averages hundreds of notes. Only a
@@ -1468,11 +1479,11 @@ that exact note, separates ``close because the bucket is broad'' from ``close be
 am in it.''
 
 \paragraph{And it manufactures a false story about \emph{where} leakage lives.} Because the
-proxy's sensitivity grows with $K$ (Table~\ref{tab:frontier}, last column pair: $0.504 \to
+proxy's sensitivity grows with $K$ (Fig.~\ref{fig:joint-frontier}b: $0.504 \to
 0.738$ as $K$ goes $32 \to 2048$) while the calibrated attack is already strong at $K = 32$
 ($0.833$), a proxy-only evaluation concludes that leakage is a \textbf{sparse, high-$K$,
 low-count-tail phenomenon}, a corner case present only in a regime whose utility
-retention (15--41\%) nobody would ship. That conclusion is wrong twice: it understates the
+retention (13--41\%) nobody would ship. That conclusion is wrong twice: it understates the
 threat at the deployed operating point, and it invites the reader to dismiss the mechanism
 as solving a problem that only exists where the system is useless anyway.
 Table~\ref{tab:leakage} preserves the proxy's numbers for the contrast.
@@ -1484,7 +1495,9 @@ Table~\ref{tab:leakage} preserves the proxy's numbers for the contrast.
   it stratifies on is \emph{empty} at $K \leq 128$, so the proxy has nothing to report at
   the recommended operating point, while the calibrated attack of \secref{sec:lira}
   breaks that same release (Table~\ref{tab:frontier}). Reading privacy off this table alone
-  is the error \secref{sec:proxy-blind} documents.}
+  is the error \secref{sec:proxy-blind} documents. The ``above chance'' column is computed
+  from the unrounded mean and std, so it will not reproduce exactly from the rounded cells
+  printed here.}
   \label{tab:leakage}
   \begin{tabular}{@{}lrlll r@{}}
     \toprule
@@ -1567,13 +1580,15 @@ $\Rightarrow$ cheaper DP).
   \label{fig:distilled-utility}
 \end{figure*}
 
-\paragraph{Leakage.} Distilled notes leak \textbf{more} than raw turns, yet DP kills both
-(Table~\ref{tab:distilled-leakage}, Fig.~\ref{fig:distilled-leakage}). Distillation
-\textbf{concentrates identifying facts}, so distilled memory is \emph{more} re-identifiable
-pre-DP (all-AUC $0.68 \to 0.80$, tail $0.93 \to 0.96$), but the private release still drives
-both to within ${\sim}2\sigma$ of chance. The gap is wider than the data-PCA grid showed
-($0.64 \to 0.73$), for the same reason as \secref{sec:proxy-blind}. The payload agents
-actually store is the one DP protects most decisively.
+\paragraph{Leakage, under the proxy.} \emph{Under the cosine proxy} distilled notes appear to
+leak \textbf{more} than raw turns, and DP kills both
+(Table~\ref{tab:distilled-leakage}, Fig.~\ref{fig:distilled-leakage}): the proxy reads
+distilled memory as \emph{more} re-identifiable pre-DP (all-AUC $0.68 \to 0.80$, tail
+$0.93 \to 0.96$), while the private release drives both to within ${\sim}2\sigma$ of chance.
+The apparent gap is wider than the data-PCA grid showed ($0.64 \to 0.73$), for the same reason
+as \secref{sec:proxy-blind}. That pre-DP gap is, however, an artifact of the proxy: the
+calibrated attack below shows it does \textbf{not} survive (AUC $0.838$ vs $0.833$), and it is
+the calibrated reading we carry.
 
 \begin{table*}[t]
   \centering
@@ -1592,11 +1607,10 @@ actually store is the one DP protects most decisively.
 \begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_distilled_leakage.pdf}
-  \caption{Distilled notes leak \emph{more} than raw turns in the clear
-  (distillation concentrates identifying facts: clean tail-AUC
-  $0.93 \to 0.96$), yet the SecAgg+Skellam release collapses \emph{both} to
-  near-chance at $\eps \approx 9.3$. The realistic payload strengthens, not
-  weakens, the result.}
+  \caption{\textbf{Under the cosine proxy}, distilled notes appear to leak \emph{more} than
+  raw turns in the clear (clean tail-AUC $0.93 \to 0.96$), and the SecAgg+Skellam release
+  collapses \emph{both} to near-chance at $\eps \approx 9.3$. The pre-DP gap does \emph{not}
+  survive the calibrated attack (Table~\ref{tab:distilled-lira}); the post-DP collapse does.}
   \label{fig:distilled-leakage}
 \end{figure*}
 
@@ -1648,7 +1662,7 @@ The total $\eps$ decomposes cleanly, and three of its four terms are zero or neg
 
 \begin{table*}[t]
   \centering
-  \caption{$\eps$ decomposition at $\sigma = 0.606$, $\delta = 10^{-5}$, $K = 32$,
+  \caption{$\eps$ decomposition at $\sigma = 0.6056$, $\delta = 10^{-5}$, $K = 32$,
   $d = 32$. The reported budget covers the \emph{whole} pipeline, not just its last stage.}
   \label{tab:eps-decomp}
   \begin{tabular}{@{}lrl@{}}
@@ -1656,7 +1670,7 @@ The total $\eps$ decomposes cleanly, and three of its four terms are zero or neg
     Term & $\eps$ & Note \\
     \midrule
     Continuous-Gaussian RDP reference   & 9.2909          & reference point \\
-    $+$ discretisation (Skellam)        & 9.2909          & surcharge $1.3 \times 10^{-9}$: free at $\texttt{range\_max} = 10^{6}$ \\
+    $+$ discretisation (Skellam)        & 9.2909          & surcharge $1.3 \times 10^{-11}$: free at $\texttt{range\_max} = 10^{6}$ \\
     $+$ projection (public seed)        & 9.2909          & data-independent $\Rightarrow +0.000$ \\
     $+$ DP clip-bound selection ($\eps_c = 0.1$) & \textbf{9.3109} & \textbf{$+0.020$ (0.2\%)} \\
     \bottomrule
@@ -1694,7 +1708,7 @@ The total $\eps$ decomposes cleanly, and three of its four terms are zero or neg
     table by two orders of magnitude, and it is the term most easily left implicit. It is,
     however, \emph{payable}: the required $\sigma$ grows only as $\sqrt{T}$, so a cadence can
     be bought up front: \textbf{monthly re-aggregation for a year at 81\% retention, inside
-    the same $\eps \approx 9.31$} (\secref{sec:multiround}). The public parameters do not
+    the same $\eps \approx 9.3$} (\secref{sec:multiround}). The public parameters do not
     recompose ($C$ is selected once; the projection and anchors are public-seed), so the
     $\eps_c$ above is charged once regardless of $T$.
 \end{itemize}
@@ -1859,7 +1873,7 @@ An empty bucket is the one place the count channel is not redundant: \texttt{nor
 pure-noise $S[k]$ into a unit vector that competes for top-$k$ slots against genuine centroids. We
 measure (a) how often empty buckets occur, and (b) whether they can be detected \emph{privately}.
 Real LongMemEval-oracle (10{,}957 notes, 500 users, $d = 32$), the paper's mechanism (randproj, DP
-clip), $\sigma_v = 0.606$ ($\eps \approx 9.3$); occupancy over 5 anchor seeds, detection on a
+clip), $\sigma_v = 0.6056$ ($\eps \approx 9.3$); occupancy over 5 anchor seeds, detection on a
 single release. Reproduce with \texttt{scripts/agentmem/\_occupancy\_channel.py}.
 
 \paragraph{(a) At the operating points, there are none.} See
@@ -1893,10 +1907,10 @@ roughly halves the sensitivity and buys 5--9 AUC points at identical $\eps$. Sec
 \textbf{not free}, and the intuition that it should be is a note-level intuition. Under
 \textbf{user-level} DP, deleting a user erases every entry of its indicator vector at once, so the
 L2 sensitivity is $\sqrt{b_u}$ (about 5--8 here, and its DP-selected public bound lands at
-$9.7$--$12.4$, not 1), and a full second composition ($\eps\ 9.31 \to 13.94$) is what buys AUC
+$9.7$--$12.4$, not 1), and a full second composition ($\eps\ 9.31 \to 13.95$) is what buys AUC
 $0.698$ where it is most needed ($K = 2048$, 23\% empty). Third, the free rule (thresholding the
 released vector's own norm against $\sigma C \sqrt{d}$, which costs no privacy because $S$ is
-already public) is \textbf{at chance} ($0.48$--$0.50$) under the final mechanism: the DP-selected
+already public) is \textbf{at chance} ($0.48$--$0.52$) under the final mechanism: the DP-selected
 clip bound is deliberately conservative, and the extra noise it buys erases the norm signal
 entirely.
 
@@ -1911,11 +1925,11 @@ entirely.
     \toprule
     Occupancy rule & Sens.\ $C_c$ & $\eps$ & $K = 512$ & $K = 1024$ & $K = 2048$ \\
     \midrule
-    $\norm{S[k]}$ vs floor $\sigma C \sqrt{d}$ (free: post-proc.) & n/a & \textbf{9.31} & 0.497 & 0.485 & 0.481 \\
-    Raw-count, $\sigma_c = 2$ (cheap 2nd comp.)                   & 20.2 & 9.78 & 0.695 & 0.561 & 0.550 \\
-    \textbf{User-indicator}, $\sigma_c = 2$                       & 9.7--12.4 & 9.78 & 0.723 & 0.593 & 0.549 \\
-    Raw-count, $\sigma_c = \sigma_v$ (full 2nd comp.)             & 20.2 & 13.94 & 0.824 & 0.683 & 0.633 \\
-    \textbf{User-indicator}, $\sigma_c = \sigma_v$                & 9.7--12.4 & 13.94 & \textbf{0.873} & \textbf{0.764} & \textbf{0.698} \\
+    $\norm{S[k]}$ vs floor $\sigma C \sqrt{d}$ (free: post-proc.) & n/a & \textbf{9.31} & 0.524 & 0.479 & 0.490 \\
+    Raw-count, $\sigma_c = 2$ (cheap 2nd comp.)                   & 20.2 & 9.81 & 0.695 & 0.561 & 0.550 \\
+    \textbf{User-indicator}, $\sigma_c = 2$                       & 9.7--12.4 & 9.81 & 0.723 & 0.593 & 0.549 \\
+    Raw-count, $\sigma_c = \sigma_v$ (full 2nd comp.)             & 20.2 & 13.95 & 0.824 & 0.683 & 0.633 \\
+    \textbf{User-indicator}, $\sigma_c = \sigma_v$                & 9.7--12.4 & 13.95 & \textbf{0.873} & \textbf{0.764} & \textbf{0.698} \\
     \bottomrule
   \end{tabular}
 \end{table*}
@@ -1968,7 +1982,7 @@ future work.
 \emph{membership} to the false-positive floor at every fidelity we measured. It does
 \textbf{not} drive \emph{closed-set reconstruction-decode} to chance at any usable $K$: at the
 recommended $K = 32$ decode is $0.396$ against a measured chance floor of $0.010$, i.e.\
-$40\times$ above it (\secref{sec:decode-floor}). We do not claim extraction is defeated.
+$38\times$ above it (\secref{sec:decode-floor}). We do not claim extraction is defeated.
 
 We do argue, and measure, that the closed-set decode is the \emph{wrong instrument}: it
 falls in lock-step with retrieval retention across the whole sweep because a centroid that
