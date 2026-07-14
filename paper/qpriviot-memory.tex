@@ -1,4 +1,4 @@
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+﻿%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Private Federated Aggregation of LLM-Agent Memory
 %% Springer Nature LaTeX template (sn-jnl.cls, v3.1 Dec 2024)
 %%
@@ -10,7 +10,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % sn-mathphys-num = numbered citations, math/physical sciences.
-\documentclass[pdflatex,sn-mathphys-num]{sn-jnl}
+\documentclass[pdflatex,sn-mathphys-num,iicol]{sn-jnl}
 
 \usepackage{graphicx}%
 \usepackage{multirow}%
@@ -686,13 +686,16 @@ We account with the exact discrete guarantee of Agarwal, Kairouz \& Liu (NeurIPS
 2021, Thm.~3.5)~\cite{agarwal2021skellam}, converting to $(\eps,\delta)$ through
 R\'enyi DP~\cite{mironov2017rdp}:
 
+% Broken across two lines: the one-line form overflows a two-column measure.
 \begin{equation}\label{eq:skellam-rdp}
+\begin{split}
   \eps_{\mathrm{RDP}}(\alpha) \;\leq\;
-  \frac{\alpha \Delta_2^2}{2\mu}
-  \;+\; \min\!\left\{
+  &\frac{\alpha \Delta_2^2}{2\mu} \\[2pt]
+  &{}+\; \min\!\left\{
     \frac{(2\alpha - 1)\Delta_2^2 + 6\Delta_1}{4\mu^2},\;
     \frac{3\Delta_1}{2\mu}
   \right\},
+\end{split}
 \end{equation}
 
 with $\mu$ the per-coordinate released variance, $\Delta_2 = C s$, and
@@ -705,7 +708,7 @@ Gaussian labels used during exploration. \textbf{Every $\eps$ in this paper is t
 rigorous Skellam-RDP value.} Table~\ref{tab:sigma-eps} gives a representative mapping
 at the $K = 32$, $d = 32$ operating point.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{$\sigma \to \eps$ at the $K = 32$, $d = 32$ operating point
   ($\delta = 10^{-5}$). Every $\eps$ is the \emph{total}: the Skellam release plus the
@@ -726,7 +729,7 @@ at the $K = 32$, $d = 32$ operating point.
     2.854 &  1.70 & \textbf{1.81} &  2.56 \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 The exploration labels ``$\eps = 8$ / $\eps = 3$'' correspond to the rigorous
 $\eps \approx 9.3$ / $\eps \approx 3.2$ under the recommended vector-only release,
@@ -765,7 +768,7 @@ the masked integer sum realises at least $\mu$ with \textbf{no trusted curator} 
 \textbf{no summand in the clear}. Only the \textbf{sum-vector channel} is released
 (\secref{sec:vector-only}): dividing by the count and L2-normalising cancels the count.
 
-\begin{algorithm}[t]
+\begin{algorithm*}[t]
 \caption{Private Federated Memory Aggregation (SecAgg $+$ Skellam, vector-only
 release). Public/shared parameters are as listed in the text above.}
 \label{alg:main}
@@ -838,7 +841,7 @@ release). Public/shared parameters are as listed in the text above.}
   \State $\eps \gets \min_\alpha \big[\eps_{\mathrm{RDP}}(\alpha) + \ln(1/\delta)/(\alpha - 1)\big]$
          \Comment{1 release $\Rightarrow {\sim}1.5\times$ tighter $\eps$}
 \end{algorithmic}
-\end{algorithm}
+\end{algorithm*}
 
 \paragraph{Why each step matters.} Lines 3--5 place a note in the \emph{shared}
 coordinate frame so different users' notes land in comparable buckets; both $P$ and the
@@ -883,7 +886,7 @@ $\mu_{\text{actual}} = (M/N)\,\mu$, an \textbf{effective noise multiplier}
 $\sigma_{\text{eff}} = \sigma\sqrt{M/N}$. The guarantee then degrades silently, and
 worst exactly when participation is worst (Table~\ref{tab:dropout}).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{Client dropout silently breaks the guarantee. True $\eps$ realised when
   each of $N$ clients injects a naive $\mu/N$ noise share but only $M$ survive.}
@@ -896,7 +899,7 @@ worst exactly when participation is worst (Table~\ref{tab:dropout}).
     true $\eps$ (nominal $\eps \approx 3.21$) & 3.21 & 3.39 &  3.87 & \textbf{4.63}  & \textbf{6.74}  \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 Two sound remedies, either of which restores a valid guarantee:
 
@@ -943,7 +946,7 @@ for it once in utility. Table~\ref{tab:multiround} prices that trade at the reco
 $K = 32$, reading retention off runs actually executed at each $\sigma$ rather than
 extrapolating.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{Buying a re-aggregation cadence inside a \textbf{fixed} total budget
   ($\eps = 9.31$, $K = 32$, $d = 32$, $\delta = 10^{-5}$; clip bound selected once,
@@ -964,7 +967,7 @@ extrapolating.
     52 & weekly, 1 year           & 4.367 & 0.283 & 66\% & 153.3 \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 The headline is that the mechanism \textbf{survives a realistic cadence}: a pool
 re-aggregated \textbf{monthly for a full year} (twelve releases, each incorporating
@@ -1073,7 +1076,7 @@ therefore re-ran the missing cells (utility at $K \geq 512$, and the calibrated 
 of \secref{sec:lira} at $K \leq 256$) and report the \textbf{joint frontier}
 (Table~\ref{tab:frontier}, Fig.~\ref{fig:joint-frontier}).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{\textbf{The joint frontier}: retrieval utility and \emph{calibrated} leakage
   at the \textbf{same} $K$ (LongMemEval-oracle, $d = 32$, vector-only; utility 5-seed,
@@ -1108,9 +1111,9 @@ of \secref{sec:lira} at $K \leq 256$) and report the \textbf{joint frontier}
       & 0.998 & 0.505 & 0.957 & 0.012 & 0.928 & 0.001 \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_joint_frontier.pdf}
   \caption{\textbf{(a) The joint frontier.} Utility retention falls monotonically with
@@ -1121,7 +1124,7 @@ of \secref{sec:lira} at $K \leq 256$) and report the \textbf{joint frontier}
   same clean release where the calibrated LiRA (red) reads AUC 0.833. The proxy was
   blind; the pool was not safe (\secref{sec:proxy-blind}).}
   \label{fig:joint-frontier}
-\end{figure}
+\end{figure*}
 
 \paragraph{The frontier has an interior optimum, and it is where we already were.}
 Three readings, all load-bearing.
@@ -1164,7 +1167,7 @@ The decode column of Table~\ref{tab:frontier} does not go to chance at any $K$ w
 deploy, and we neither hide that nor explain it away. We instead measure what the metric is
 actually made of, and the answer disqualifies it as an independent privacy axis.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{\textbf{The decode metric's chance floor}, measured by scoring the same attack
   against a \textbf{pure random unit vector} (zero information about the corpus or the
@@ -1185,7 +1188,7 @@ actually made of, and the answer disqualifies it as an independent privacy axis.
     2048        & 5   & 0.001 & 0.001 & $2\times$ & 13\% \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 \paragraph{Decode and retrieval are the same quantity.} Read the last two columns of
 Table~\ref{tab:decode-floor} together: decode falls $0.396 \to 0.070 \to 0.001$ exactly as
@@ -1238,7 +1241,7 @@ each released centroid to its nearest note and score a hit when the top-1 decode
 true in-bucket member. Fits use a shadow split disjoint from the evaluation shadows (no
 train-on-test bias).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{Calibrated offline-LiRA and reconstruction-decode extraction (LongMemEval oracle,
   $d = 32$, 3 seeds $\times$ 48 shadow releases). The clean release is far more leaky than the
@@ -1253,7 +1256,7 @@ train-on-test bias).
     1024 & $\eps \approx 3.2$  & 0.501          & 0.012          & 0.002 & 0.001 \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 Calibration exposes what cosine-AUC missed (Table~\ref{tab:lira}): on the clean pool an
 adversary re-identifies members at \textbf{${\approx}95\%$ true-positive rate at a 1\%
@@ -1268,7 +1271,7 @@ its own weakness, not a real membership signal.
 The effect holds across the fidelity sweep (Table~\ref{tab:lira-sweep}): clean leakage rises
 with $K$ exactly as \secref{sec:proxy-blind} predicted, while DP pins every cell at chance.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{LiRA across the fidelity sweep. Clean leakage rises with $K$; DP pins every cell
   at the false-positive floor.}
@@ -1282,7 +1285,7 @@ with $K$ exactly as \secref{sec:proxy-blind} predicted, while DP pins every cell
     2048 & 0.957 & 0.012 & 0.928 & 0.001 \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 This LiRA is scored \textbf{per candidate note over all buckets}, not only the sparse tail:
 the TPR@1\%FPR of $0.945$ above is the all-bucket figure. It therefore already covers the
@@ -1312,7 +1315,7 @@ store, a different release model than our centroid pool) as the subject of
 Retrieval survives DP in the coarse-$K$ regime and degrades gracefully as memory
 fidelity $K$ grows (Table~\ref{tab:utility}, Fig.~\ref{fig:utility-vs-eps}).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{LongMemEval-oracle retrieval utility by bucket fidelity $K$
   (evidence-recall@5, $d = 32$, vector-only release, 5-seed mean $\pm$ std).}
@@ -1327,9 +1330,9 @@ fidelity $K$ grows (Table~\ref{tab:utility}, Fig.~\ref{fig:utility-vs-eps}).
     256         & 0.020 & \pmm{0.167}{0.022} & \pmm{0.100}{0.035} & \pmm{0.057}{0.031} & 60\% \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_utility_vs_eps.pdf}
   \caption{Retrieval utility vs privacy budget (LongMemEval oracle, $d = 32$).
@@ -1339,7 +1342,7 @@ fidelity $K$ grows (Table~\ref{tab:utility}, Fig.~\ref{fig:utility-vs-eps}).
   axis is the rigorous Skellam-RDP budget of \secref{sec:accounting}, clip selection
   included.}
   \label{fig:utility-vs-eps}
-\end{figure}
+\end{figure*}
 
 At the recommended operating point ($K = 32$, $d = 32$) the private pool keeps
 \textbf{95\%} of clean evidence-recall at $\eps \approx 9.3$ and \textbf{85\%} at
@@ -1389,7 +1392,7 @@ DP clip bound of \secref{sec:clip}. At $d = 384$ the projection is the \textbf{i
 so all three arms must coincide: that is the control, and they do
 (Tables~\ref{tab:abl-utility} and~\ref{tab:abl-leakage}).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{\textbf{(a) Private utility} under the three projections
   (topic-acc @ $\eps \approx 9.3$, real \texttt{all-MiniLM-L6-v2}, $N = 100$, $K = 32$;
@@ -1405,9 +1408,9 @@ so all three arms must coincide: that is the control, and they do
     384 \emph{(identity)}  & 0.161          & 0.161          & \textbf{0.161} \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{\textbf{(b) Leakage} under the three projections (tail-AUC at $K = 1024$;
   $0.5 =$ no leakage). The pre-DP gradient that motivated the crossover claim exists only
@@ -1425,7 +1428,7 @@ so all three arms must coincide: that is the control, and they do
     384 \emph{(identity)} & 0.989 & 0.989 & 0.989 & 0.541 & 0.541 \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 Both halves of the crossover dissolve. On the \textbf{utility} axis, tiny-$d$ wins by
 91\% under data-PCA ($0.308$ vs $0.161$ at the identity), and under either
@@ -1451,7 +1454,7 @@ individuating signal an attacker needs, which is precisely the ``both axes at on
 effect. But it purchases both with the same illicit currency: information about the private
 corpus, spent outside the accountant. A random projection, spending nothing, buys neither.
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_projection_ablation.pdf}
   \caption{The dimension crossover is a property of the projection, not of the
@@ -1463,7 +1466,7 @@ corpus, spent outside the accountant. A random projection, spending nothing, buy
   control. Shaded band: post-DP tail-AUC, flat at chance for every $d$ and every
   projection.}
   \label{fig:projection-ablation}
-\end{figure}
+\end{figure*}
 
 \paragraph{What survives.} Tiny-$d$ remains a reasonable engineering default, on grounds
 that have nothing to do with a privacy/utility joint optimum: at $d = 32$ the payload is
@@ -1516,7 +1519,7 @@ it invites the reader to dismiss the mechanism as solving a problem that only ex
 the system is useless anyway. Table~\ref{tab:leakage} preserves the proxy's numbers for the
 contrast.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{The uncalibrated cosine proxy (LongMemEval oracle; tail-AUC over buckets with
   $\leq 3$ contributors, $0.5 =$ no leakage). \textbf{Retained for contrast only.} The tail
@@ -1535,9 +1538,9 @@ contrast.
     2048 & 16\% & \pmm{0.915}{0.010} & \pmm{0.541}{0.009} & \pmm{0.504}{0.012} & $4.4\sigma$ \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_leakage_drop.pdf}
   \caption{The proxy's own endpoint, retained for the record: on the sparse tail it
@@ -1547,7 +1550,7 @@ contrast.
   of \secref{sec:lira} shows the release is leaking there too
   (Fig.~\ref{fig:joint-frontier}b).}
   \label{fig:leakage-drop}
-\end{figure}
+\end{figure*}
 
 \paragraph{What the proxy \emph{does} establish, kept for the record.} On the sparse tail it
 is able to see ($K \geq 512$, where $2$--$16\%$ of members sit in buckets with $\leq 3$
@@ -1581,7 +1584,7 @@ pool retains \textbf{89\% at $\eps \approx 9.3$}; the 100-user pilot retains 65\
 \textbf{density, not scale per se, governs retention} (more contributors per bucket
 $\Rightarrow$ cheaper DP).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{Distilled-notes utility (answer-recall@5, vector-only release).}
   \label{tab:distilled-utility}
@@ -1594,9 +1597,9 @@ $\Rightarrow$ cheaper DP).
     100 (pilot)     & 32 & \pmm{0.496}{0.029} & \pmm{0.324}{0.068} & 65\% \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_distilled_utility.pdf}
   \caption{Distilled-notes utility (answer-recall@5). Density governs DP
@@ -1604,7 +1607,7 @@ $\Rightarrow$ cheaper DP).
   $\eps \approx 9.3$, whereas the sparser 100-user pilot retains only 65\% at the
   same budget. More contributors per bucket $\Rightarrow$ cheaper DP.}
   \label{fig:distilled-utility}
-\end{figure}
+\end{figure*}
 
 \paragraph{Leakage.} Distilled notes leak \textbf{more} than raw turns, yet DP kills both
 (Table~\ref{tab:distilled-leakage}, Fig.~\ref{fig:distilled-leakage}). Distillation
@@ -1614,7 +1617,7 @@ both to within ${\sim}2\sigma$ of chance. The gap is wider than the data-PCA gri
 ($0.64 \to 0.73$), for the same reason as \secref{sec:proxy-blind}. The payload agents
 actually store is the one DP protects most decisively.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{Raw turns vs LLM-distilled notes (full 500-user run, $K = 1024$, tail-AUC).}
   \label{tab:distilled-leakage}
@@ -1626,9 +1629,9 @@ actually store is the one DP protects most decisively.
     \textbf{LLM-distilled notes}    & \textbf{0.801} & \textbf{0.963} & \pmm{0.557}{0.026} & $2.2\sigma$ \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_distilled_leakage.pdf}
   \caption{Distilled notes leak \emph{more} than raw turns in the clear
@@ -1637,7 +1640,7 @@ actually store is the one DP protects most decisively.
   near-chance at $\eps \approx 9.3$. The realistic payload strengthens, not
   weakens, the result.}
   \label{fig:distilled-leakage}
-\end{figure}
+\end{figure*}
 
 \paragraph{The calibrated attack on the realistic payload.} Table~\ref{tab:distilled-leakage}
 is a \emph{cosine-proxy} result, and \secref{sec:proxy-blind} has just argued that a
@@ -1649,7 +1652,7 @@ tells the same story as the raw payload does: the clean distilled pool is thorou
 (AUC $0.838$, TPR@1\%FPR $0.171$, i.e.\ $17\times$ the floor, and $75\%$ of centroids decoded to
 a true in-bucket note), and the private release drives it to the floor.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{\textbf{Calibrated} LiRA on the LLM-distilled payload (500 users, 6{,}116 notes,
   $K = 32$, $d = 32$; 3 seeds $\times$ 48 shadows): the realistic agent-memory object, measured
@@ -1669,7 +1672,7 @@ a true in-bucket note), and the private release drives it to the floor.
     \textbf{LLM-distilled notes} & $\eps \approx 9.3$ & 0.503 & \textbf{0.011} & \textbf{0.302} \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 Two honest corrections to the proxy's story follow. First, under the calibrated attack the
 distilled payload is \textbf{not} meaningfully leakier than raw turns in the clear (AUC $0.838$
@@ -1687,7 +1690,7 @@ operating point and the same budget as on raw turns.}
 The total $\eps$ decomposes cleanly, and three of its four terms are zero or negligible
 (Table~\ref{tab:eps-decomp}).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{$\eps$ decomposition at $\sigma = 0.606$, $\delta = 10^{-5}$, $K = 32$,
   $d = 32$. The reported budget covers the \emph{whole} pipeline, not just its last stage.}
@@ -1702,7 +1705,7 @@ The total $\eps$ decomposes cleanly, and three of its four terms are zero or neg
     $+$ DP clip-bound selection ($\eps_c = 0.1$) & \textbf{9.3109} & \textbf{$+0.020$ (0.2\%)} \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 \begin{itemize}
   \item \textbf{Discretisation is free.} At $\texttt{range\_max} = 10^{6}$ the discrete
@@ -1766,7 +1769,7 @@ predicts.
 order of magnitude below the 5-seed std ($0.02$--$0.06$). The honest reading is that at this
 density \textbf{DP costs nothing measurable}.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{At-scale utility (LongMemEval \texttt{s}, 246k notes; evidence-recall@5,
   $d = 32$, 5-seed).}
@@ -1781,14 +1784,14 @@ density \textbf{DP costs nothing measurable}.
     256         & 0.020 & \pmm{0.159}{0.020} & \pmm{0.154}{0.018} & \pmm{0.134}{0.022} & \textbf{97\%} \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 \paragraph{The vulnerable tail vanishes.} At this density essentially every bucket has many
 contributors, so the low-count tail ($\leq 3$ contributors) is \textbf{empty (0\% of members)}
 across $K \in \{512, 1024, 2048\}$, and membership inference is \textbf{already at chance
 without DP} (Table~\ref{tab:at-scale-leakage}).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{At-scale leakage (LongMemEval \texttt{s}). The vulnerable tail is empty, and
   membership inference is at chance even on the clean pool.}
@@ -1802,7 +1805,7 @@ without DP} (Table~\ref{tab:at-scale-leakage}).
     2048 & 0.0\% & 0.529 & 0.502 \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 \paragraph{How to read this, corrected.} The superseded draft used this run to argue that the
 leakage-drop is ``really'' a sparse-tail phenomenon, and that the dense regime is therefore
@@ -1833,7 +1836,7 @@ asks the agent to reproduce its memory verbatim, and (b) a \textbf{MRMMIA}~\cite
 membership probe for a candidate note. We hold the distilled notes fixed and swap only the
 shared-memory back-end (Table~\ref{tab:live-agent}).
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{The published attacks against a live agent (60 users, 883 distilled notes,
   $K = 256$, $d = 32$, the paper's mechanism: randproj $+$ DP clip; 40 extraction and 120
@@ -1849,7 +1852,7 @@ shared-memory back-end (Table~\ref{tab:live-agent}).
     \textbf{Our SecAgg+Skellam pool} ($\eps \approx 9.3$) & \pmm{\mathbf{0.017}}{\mathbf{0.012}} & \pmm{0.526}{0.044} \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 On the raw-text agent both published attacks succeed decisively: every targeted member note is
 reproduced verbatim and membership is inferred at AUC $0.98$. Against our release both collapse:
@@ -1915,7 +1918,7 @@ $K \leq 256$, where at most \textbf{one bucket of 256} is ever empty; at the rec
 $K = 32$ there are none on any seed. The noisy-normalisation failure mode is \textbf{absent from
 the reported utility} rather than suppressed by tuning.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{Empty-bucket rate by fidelity $K$ (5 anchor seeds). Every retrieval number in
   this paper is reported at $K \leq 256$, where at most one bucket of 256 is ever empty.}
@@ -1931,7 +1934,7 @@ the reported utility} rather than suppressed by tuning.
       & \pmm{0.23}{0.19} & \pmm{2.66}{0.88} & \pmm{10.14}{1.53} & \pmm{22.91}{2.01} \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 \paragraph{(b) Where it does occur, occupancy is expensive to release.} See
 Table~\ref{tab:occupancy-detect}. Three readings, all load-bearing. First, the right channel is
@@ -1947,7 +1950,7 @@ already public) is \textbf{at chance} ($0.48$--$0.50$) under the final mechanism
 clip bound is deliberately conservative, and the extra noise it buys erases the norm signal
 entirely.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
   \caption{Occupancy-detection AUC (empty vs occupied; $0.5 =$ undetectable), against the total
   $\eps$ of the release. No rule is simultaneously free and accurate.}
@@ -1965,7 +1968,7 @@ entirely.
     \textbf{User-indicator}, $\sigma_c = \sigma_v$                & 9.7--12.4 & 13.94 & \textbf{0.873} & \textbf{0.764} & \textbf{0.698} \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 Neither is an implementation shortfall. The DP noise that drives membership inference to chance in
 a one-contributor bucket (\secref{sec:proxy-blind}) is \emph{the same noise} that hides whether the
@@ -2288,7 +2291,7 @@ scripts/shell/rerun\_lira.sh} for \secref{sec:lira}; \secref{sec:live-agent} nee
   \item \textbf{Data availability.} All datasets used are public: LongMemEval
     (oracle and \texttt{s} variants)~\cite{wu2024longmemeval} and 20-Newsgroups. The
     LLM-distilled note corpus is regenerated by
-    \texttt{scripts/agentmem/\_longmemeval\_distill.py}.
+    \texttt{scripts/agentmem/\allowbreak\_longmemeval\_distill.py}.
   \item \textbf{Materials availability.} Not applicable.
   \item \textbf{Code availability.} The full harness, experiment grid and figure/table
     generators are released with the paper (\secref{sec:repro}).
