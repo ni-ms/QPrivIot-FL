@@ -45,9 +45,12 @@ KS = [32, 64, 128, 256, 512, 1024, 2048]
 
 # Operating point of the accounting (paper §5.4): the DP-selected clip bound lands at C=32 on
 # the public geometric grid, range_max = 1e6, d = 32, delta = 1e-5.
-C_CLIP, RANGE_MAX, DIM, DELTA = 32.0, 1e6, 32, 1e-5
+# DIM is the dimension the L1 sensitivity bound Delta_1 <= sqrt(DIM)*Delta_2 is taken over, and
+# that is the FULL K*d payload -- the object the global clip acts on (paper Remark 1), not d.
+# (The correction term it feeds is O(1e-4), so this does not move the reported eps.)
+C_CLIP, RANGE_MAX, DIM, DELTA = 32.0, 1e6, 32 * 32, 1e-5
 SIGMA_EPS93 = 0.6056006578256736   # the sigma the "eps=8" run label corresponds to
-EPS_TARGET = 9.31                  # its rigorous total eps, clip selection included
+EPS_TARGET = 9.31                  # the budget the multi-round sigmas were solved/run against
 
 
 def _first(*paths):
