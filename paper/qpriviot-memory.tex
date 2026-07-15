@@ -575,8 +575,7 @@ accountant assumes and an implementation must honour.
     aggregation, which lowers $C$ and hence the absolute noise.
 \end{itemize}
 
-\subsection{Vector-only release, and what the count channel is (and is not)
-for}\label{sec:vector-only}
+\subsection{Vector-only release and the count channel}\label{sec:vector-only}
 
 The natural design releases \textbf{two} channels (the sum-vector and the counts),
 costing two RDP compositions. For the \emph{direction} of the retrieval centroid the
@@ -1584,7 +1583,7 @@ $\Rightarrow$ cheaper DP).
 \end{figure*}
 
 \paragraph{Leakage, under the proxy.} \emph{Under the cosine proxy} distilled notes appear to
-leak \textbf{more} than raw turns, and DP kills both
+leak \textbf{more} than raw turns, and DP diminishes both
 (Table~\ref{tab:distilled-leakage}, Fig.~\ref{fig:distilled-leakage}): the proxy reads
 distilled memory as \emph{more} re-identifiable pre-DP (all-AUC $0.68 \to 0.80$, tail
 $0.93 \to 0.96$), while the private release drives both to within ${\sim}2\sigma$ of chance.
