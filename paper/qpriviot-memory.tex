@@ -10,7 +10,9 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % sn-mathphys-num = numbered citations, math/physical sciences.
-\documentclass[pdflatex,sn-mathphys-num,iicol,12pt]{sn-jnl}
+% Single-column (sn-jnl default) for peer review; drop `iicol` was the
+% two-column journal look. Re-add `iicol` only for a two-column proof.
+\documentclass[pdflatex,sn-mathphys-num,12pt]{sn-jnl}
 
 \usepackage{graphicx}%
 \usepackage{multirow}%
@@ -78,8 +80,11 @@ Leakage-Drop Guarantee under Secure Aggregation and the Skellam Mechanism}
 %% \state / \country with the real address, and add \orcid{...} to the  %%
 %% \author line (register free at https://orcid.org if you have none).  %%
 %%=====================================================================%%
-\author*[1]{\fnm{Nikhil} \sur{Sharma}}\email{nikmsharma@gmail.com}
-% e.g. \author*[1]{\fnm{Nikhil} \sur{Sharma}}\email{...}\orcid{0000-0000-0000-0000}
+\author*[1]{\fnm{Nikhil} \sur{Sharma}\orcid{https://orcid.org/0000-0002-1651-0879}}\email{nikmsharma@gmail.com}
+% NB: sn-jnl's \orcid prints a linked icon WHERE it is called (it is not author
+% metadata like \email), so it must sit INSIDE the \author{...} braces, right
+% after \sur{}. Placed after \email{} it lands in the document body on its own
+% page. Use the full https://orcid.org/... URL so the icon links correctly.
 
 \affil*[1]{\orgname{Independent Researcher}}
 % e.g. \affil*[1]{\orgdiv{Dept.\ of ...}, \orgname{...}, \orgaddress{\city{...},
@@ -281,8 +286,9 @@ grid are released (\secref{sec:repro}).
 \paragraph{Federated DP with secure aggregation and discrete noise.}
 Federated learning~\cite{mcmahan2017fedavg} trains on decentralised data without
 centralising it, and SecAgg~\cite{bonawitz2017secagg} lets a server compute a sum
-of client vectors without seeing any summand. To obtain a DP guarantee that
-composes under that sum without a trusted curator, discrete mechanisms are used:
+of client vectors without seeing any summand. To obtain a differential-privacy
+guarantee~\cite{dwork2014foundations} that composes under that sum without a
+trusted curator, discrete mechanisms are used:
 the \textbf{distributed discrete Gaussian}~\cite{kairouz2021ddgauss} and the
 \textbf{Skellam mechanism}~\cite{agarwal2021skellam}, the latter being closed
 under addition (the sum of Skellams is Skellam) and efficient at low bit-width.
@@ -295,7 +301,7 @@ payload to \textbf{agent-memory embeddings} and the objective to
 Agent frameworks A-MEM~\cite{xu2024amem} and Mem0~\cite{chhikara2024mem0} persist
 distilled per-user memories. Their privacy is under active attack:
 \textbf{MEXTRA}~\cite{wang2025mextra} extracts memory content and
-\textbf{MRMMIA}~\cite{chen2026mrmmia} runs membership inference; a
+\textbf{MRMMIA}~\cite{chen2026mrmmia} runs membership inference~\cite{shokri2017mia}; a
 memory-security survey~\cite{lin2026survey} catalogues this attack literature.
 Defenses so far are \textbf{access control} (\emph{Collaborative
 Memory}~\cite{rezazadeh2025collabmem}, which also introduces a
@@ -411,8 +417,9 @@ corpora).
 
 Let each note $i$ of user $u$ have embedding $e_i \in \R^{D}$ from a sentence
 encoder. We reduce to a working dimension $d$ with a \textbf{public-seed Gaussian
-random projection} $P \in \R^{D \times d}$, $P_{jk} \sim \mathcal{N}(0, 1/d)$,
-L2-normalize, and assign to one of $K$ buckets by random-hyperplane LSH: fix $K$
+random projection}~\cite{achlioptas2003rp} $P \in \R^{D \times d}$,
+$P_{jk} \sim \mathcal{N}(0, 1/d)$, L2-normalize, and assign to one of $K$ buckets
+by random-hyperplane LSH~\cite{charikar2002simhash}: fix $K$
 random anchors $a_1, \dots, a_K$ and set
 $\mathrm{bucket}(i) = \arg\max_k \langle e_i, a_k \rangle$. Both $P$ and the
 anchors are drawn from a \textbf{published seed and never touch user data}, so
@@ -449,7 +456,9 @@ $V_u = [v_u[1]; \dots; v_u[K]] \in \R^{K \cdot d}$. We therefore clip $V_u$
 a fixed grid of resolution $s = \texttt{range\_max} / B$
 ($\texttt{range\_max} = 10^{6}$, $B$ the quantiser bound). This yields integer
 vectors amenable to SecAgg and to a discrete noise mechanism, with
-\textbf{user-level L2 sensitivity exactly $\Delta_2 = C \cdot s$}.
+\textbf{user-level L2 sensitivity exactly $\Delta_2 = C \cdot s$}
+(calibrating noise to sensitivity in the sense of Dwork et
+al.~\cite{dwork2006calibrating}).
 
 \paragraph{Neighbouring relation.} Throughout, two datasets are neighbours if one
 is obtained from the other by \textbf{adding or removing a single user}
@@ -476,7 +485,7 @@ Neither is expensive to fix.
     regardless of $s = \texttt{range\_max}/B$ (\secref{sec:accounting}). Nothing is paid.
 
   \item \textbf{$C$ is DP-selected.} We choose $C$ from a public geometric grid
-    with the \textbf{exponential mechanism} on the rank utility
+    with the \textbf{exponential mechanism}~\cite{mcsherry2007expmech} on the rank utility
     $u(c) = -\left| \#\{u : \norm{V_u}_2 \leq c\} - q N \right|$, $q = 0.95$,
     sampling $c$ with probability $\propto \exp(\eps_c \, u(c) / 2)$. Its
     sensitivity under \textbf{add/remove} deserves care, because the count
@@ -1213,7 +1222,7 @@ extraction}\label{sec:lira}
 
 The similarity scores in \secref{sec:crossover}--\secref{sec:distilled} embody the
 \emph{measurement principle} of MEXTRA/MRMMIA but are a weak, uncalibrated proxy. We now run
-the \textbf{modern MIA standard} against the released pool: an \textbf{offline LiRA} that, for
+the \textbf{modern MIA standard}~\cite{carlini2022lira} against the released pool: an \textbf{offline LiRA} that, for
 each candidate note, estimates its membership-score distribution when it is \emph{aggregated
 into} vs \emph{held out of} the pool from many \textbf{shadow releases} (cheap here: our
 aggregation is numpy, not model training) and tests with the per-target likelihood ratio. We
@@ -1258,6 +1267,7 @@ with $K$ exactly as \secref{sec:proxy-blind} predicted, while DP pins every cell
   \caption{LiRA across the fidelity sweep. Clean leakage rises with $K$; DP pins every cell
   at the false-positive floor.}
   \label{tab:lira-sweep}
+  \footnotesize
   \begin{tabular}{@{}lrrrr@{}}
     \toprule
     $K$ & Clean TPR@1\%FPR & $\eps \approx 9.3$ TPR@1\%FPR & Clean decode & $\eps \approx 9.3$ decode \\
@@ -1604,7 +1614,8 @@ the calibrated reading we carry.
   \centering
   \caption{Raw turns vs LLM-distilled notes (full 500-user run, $K = 1024$, tail-AUC).}
   \label{tab:distilled-leakage}
-  \begin{tabular}{@{}lrrl r@{}}
+  \footnotesize
+  \begin{tabular}{@{}lrrlr@{}}
     \toprule
     Source & Clean all-AUC & Clean tail-AUC & $\eps \approx 9.3$ tail-AUC & Above chance \\
     \midrule
@@ -1675,6 +1686,7 @@ The total $\eps$ decomposes cleanly, and three of its four terms are zero or neg
   \caption{$\eps$ decomposition at $\sigma = 0.6056$, $\delta = 10^{-5}$, $K = 32$,
   $d = 32$. The reported budget covers the \emph{whole} pipeline, not just its last stage.}
   \label{tab:eps-decomp}
+  \footnotesize
   \begin{tabular}{@{}lrl@{}}
     \toprule
     Term & $\eps$ & Note \\
