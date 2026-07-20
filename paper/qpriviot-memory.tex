@@ -70,41 +70,49 @@ Aggregation of LLM-Agent Memory: Usable Shared Memory with a Measurable
 Leakage-Drop Guarantee under Secure Aggregation and the Skellam Mechanism}
 
 %%=====================================================================%%
-%% AFFILIATION: placeholder set to "Independent Researcher" so the      %%
-%% document typesets with no dangling superscript. REPLACE with your    %%
-%% real \orgdiv / \orgname / \city / \country before a Springer         %%
-%% submission (arXiv does not require it).                              %%
+%% TITLE PAGE: PPNA requires each author's full affiliation             %%
+%% (Department, Institution, City, State, Country) and, if available,   %%
+%% a 16-digit ORCID. The affiliation below is a placeholder             %%
+%% ("Independent Researcher") so the document typesets with no dangling %%
+%% superscript. BEFORE SUBMITTING: fill \orgdiv / \orgname / \city /    %%
+%% \state / \country with the real address, and add \orcid{...} to the  %%
+%% \author line (register free at https://orcid.org if you have none).  %%
 %%=====================================================================%%
 \author*[1]{\fnm{Nikhil} \sur{Sharma}}\email{nikmsharma@gmail.com}
+% e.g. \author*[1]{\fnm{Nikhil} \sur{Sharma}}\email{...}\orcid{0000-0000-0000-0000}
 
 \affil*[1]{\orgname{Independent Researcher}}
+% e.g. \affil*[1]{\orgdiv{Dept.\ of ...}, \orgname{...}, \orgaddress{\city{...},
+%                 \state{...}, \country{...}}}
 
 %% Springer style: no cross-references, citations or equations in the abstract.
+%% Abstract kept to 248 words (PPNA limit: 150--250), no citations or
+%% cross-references, per the journal's Instructions for Authors.
 \abstract{LLM agents accumulate per-user memory (distilled notes and
-preferences) that makes them personal and effective. Pooling it across users
-would give a fleet a shared \textbf{routing prior} over what the fleet
-collectively knows, but memory is exactly the sensitive artifact: published
-extraction and membership-inference attacks recover verbatim user facts from it.
+preferences) that makes them personal. Pooling it across users would give a
+fleet a shared \textbf{routing prior}, but memory is exactly the sensitive
+artifact: published extraction and membership-inference attacks recover verbatim
+user facts.
 
 We aggregate per-user memory-note embeddings into a bucketed \textbf{centroid
 memory} under \textbf{Secure Aggregation} composed with the discrete
 \textbf{Skellam mechanism}, so the pool carries a central differential-privacy
 guarantee with no trusted curator and no note in the clear. We evaluate on real
-long-horizon conversational memory and on LLM-distilled agent notes, insisting
-that utility and leakage be read at the same operating point.
+long-horizon conversational memory and LLM-distilled agent notes, reading
+utility and leakage at the same operating point.
 
 Four findings. First, on a \textbf{joint frontier} measuring both axes at every
-bucket fidelity, the coarse regime is usable and safe at once: the pool keeps
+bucket fidelity, the coarse regime is usable and safe: the pool keeps
 \textbf{95\% of clean retrieval utility} while a calibrated likelihood-ratio
 attack falls from an AUC of 0.833 to the 1\% false-positive floor. Second, that
 endpoint is \textbf{invisible to the weak attack the literature defaults to}: an
-uncalibrated cosine proxy reports chance on the very release the calibrated
+uncalibrated cosine proxy reports chance on the release the calibrated
 attack breaks, so a proxy-only evaluation would certify a leaking pool as safe.
 Third, \textbf{data-dependent preprocessing silently inflates such results}:
 fitting the projection on user notes is an unaccounted release that also
-manufactures an apparent dimension effect, which vanishes under a public-seed
-projection. Fourth, we account for the \textbf{repeated release} a deployed
-memory requires, whose cost grows only as the square root of the round count.
+manufactures an apparent dimension effect, gone under a public-seed
+projection. Fourth, we account for the \textbf{repeated release} a deployment
+requires, whose cost grows only as the square root of the round count.
 Every parameter of the mechanism is public or DP-accounted, so the reported
 budget covers the whole pipeline.}
 
@@ -2234,7 +2242,9 @@ scripts/shell/rerun\_lira.sh} for \secref{sec:lira}; \secref{sec:live-agent} nee
 %%=====================================================================%%
 \backmatter
 
-\section*{Declarations}
+%% PPNA requires this exact heading ("Statements and Declarations") with a
+%% Competing Interests statement; Funding, Ethics, Data availability follow.
+\section*{Statements and Declarations}
 \begin{itemize}
   \item \textbf{Funding.} No funding was received for conducting this study.
   \item \textbf{Competing interests.} The author declares no competing interests.
