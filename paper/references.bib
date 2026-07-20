@@ -200,7 +200,7 @@
 
 %% Accepted at ICPR 2026; no DOI minted yet.
 @article{abouelenein2026dpdatastore,
-  author  = {Abouelenein, Ahmed and Torki, Marwan},
+  author  = {Abouelenein, Abdelrahman and Torki, Marwan},
   title   = {Differentially Private Datastore Generation for Retrieval-Augmented
              Inference},
   journal = {arXiv preprint},
@@ -301,4 +301,92 @@
   year      = {2011},
   doi       = {10.1145/1993636.1993743},
   note      = {Exponential-mechanism quantile selection}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Added 2026-07: foundational method/attack references that the text
+%% invokes by name (LiRA, random-hyperplane LSH, random projection,
+%% the exponential mechanism, DP/sensitivity). Every DOI below was
+%% verified against Crossref (2026-07); the two with an arXiv version
+%% carry a verified eprint. Nothing here is guessed.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+@inproceedings{carlini2022lira,
+  author    = {Carlini, Nicholas and Chien, Steve and Nasr, Milad and
+               Song, Shuang and Terzis, Andreas and Tram{\`e}r, Florian},
+  title     = {Membership Inference Attacks From First Principles},
+  booktitle = {2022 IEEE Symposium on Security and Privacy (SP)},
+  pages     = {1897--1914},
+  year      = {2022},
+  doi       = {10.1109/SP46214.2022.9833649},
+  eprint    = {2112.03570},
+  archivePrefix = {arXiv},
+  note      = {The offline/online LiRA membership-inference attack}
+}
+
+@inproceedings{shokri2017mia,
+  author    = {Shokri, Reza and Stronati, Marco and Song, Congzheng and
+               Shmatikov, Vitaly},
+  title     = {Membership Inference Attacks Against Machine Learning Models},
+  booktitle = {2017 IEEE Symposium on Security and Privacy (SP)},
+  pages     = {3--18},
+  year      = {2017},
+  doi       = {10.1109/SP.2017.41},
+  eprint    = {1610.05820},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{charikar2002simhash,
+  author    = {Charikar, Moses S.},
+  title     = {Similarity Estimation Techniques from Rounding Algorithms},
+  booktitle = {Proceedings of the 34th Annual ACM Symposium on Theory of
+               Computing (STOC)},
+  pages     = {380--388},
+  year      = {2002},
+  doi       = {10.1145/509907.509965}
+}
+
+@article{achlioptas2003rp,
+  author    = {Achlioptas, Dimitris},
+  title     = {Database-Friendly Random Projections: {Johnson}--{Lindenstrauss}
+               with Binary Coins},
+  journal   = {Journal of Computer and System Sciences},
+  volume    = {66},
+  number    = {4},
+  pages     = {671--687},
+  year      = {2003},
+  doi       = {10.1016/S0022-0000(03)00025-4}
+}
+
+@inproceedings{mcsherry2007expmech,
+  author    = {McSherry, Frank and Talwar, Kunal},
+  title     = {Mechanism Design via Differential Privacy},
+  booktitle = {48th Annual IEEE Symposium on Foundations of Computer Science
+               (FOCS)},
+  pages     = {94--103},
+  year      = {2007},
+  doi       = {10.1109/FOCS.2007.66}
+}
+
+@inproceedings{dwork2006calibrating,
+  author    = {Dwork, Cynthia and McSherry, Frank and Nissim, Kobbi and
+               Smith, Adam},
+  title     = {Calibrating Noise to Sensitivity in Private Data Analysis},
+  booktitle = {Theory of Cryptography Conference (TCC)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {3876},
+  pages     = {265--284},
+  year      = {2006},
+  doi       = {10.1007/11681878_14}
+}
+
+@article{dwork2014foundations,
+  author    = {Dwork, Cynthia and Roth, Aaron},
+  title     = {The Algorithmic Foundations of Differential Privacy},
+  journal   = {Foundations and Trends in Theoretical Computer Science},
+  volume    = {9},
+  number    = {3--4},
+  pages     = {211--407},
+  year      = {2014},
+  doi       = {10.1561/0400000042}
 }
