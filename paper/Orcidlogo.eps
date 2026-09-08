@@ -1,0 +1,28 @@
+%!PS-Adobe-3.0 EPSF-3.0
+%%Creator: local reconstruction of the ORCID iD icon for sn-jnl \orcidlogo
+%%Title: Orcidlogo
+%%BoundingBox: 0 0 14 14
+%%HiResBoundingBox: 0 0 14 14
+%%EndComments
+% The Springer class hard-codes \includegraphics{Orcidlogo.eps} inside its
+% \orcid macro; the template ships this asset but it was absent from the repo,
+% so any active \orcid broke the build. This is a faithful inline rendering of
+% the public ORCID iD icon (green #A6CE39 rounded square, white "iD").
+gsave
+% --- green rounded-square background ---
+0.651 0.808 0.224 setrgbcolor
+newpath
+2.5 0 moveto
+14 0 14 14 2.5 arcto pop pop pop pop
+14 14 0 14 2.5 arcto pop pop pop pop
+0 14 0 0 2.5 arcto pop pop pop pop
+0 0 14 0 2.5 arcto pop pop pop pop
+closepath
+fill
+% --- white "iD" ---
+1 1 1 setrgbcolor
+/Helvetica-Bold findfont 8 scalefont setfont
+3 4 moveto (iD) show
+grestore
+showpage
+%%EOF

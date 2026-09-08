@@ -20,7 +20,26 @@ In the `QPrivIot-FL` directory, use `flwr run` to run a local simulation:
 flwr run .
 ```
 
-Refer to the [How to Run Simulations](https://flower.ai/docs/framework/how-to-run-simulations.html) guide in the documentation for advice on how to optimize your simulations.
+To run with specific configurations (e.g., deterministic seeding, alpha sweep):
+
+```bash
+flwr run . --run-config 'seed=1337 num-server-rounds=50 dataset="cifar10" dirichlet-alpha=0.3'
+```
+
+## Running Tests
+
+To run the unit and integration tests:
+
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run fast tests
+pytest tests/ -m "not slow"
+
+# Run all tests (including those that download datasets)
+pytest tests/
+```
 
 ## Run with the Deployment Engine
 
@@ -36,3 +55,17 @@ You can run Flower on Docker too! Check out the [Flower with Docker](https://flo
 - Join the Flower community!
   - [Flower Slack](https://flower.ai/join-slack/)
   - [Flower Discuss](https://discuss.flower.ai/)
+
+
+## Experiments
+
+```bash
+# Baseline (No DP)
+flwr run . --run-config 'use-dp=false'
+
+# Uniform DP
+flwr run . --run-config 'use-dp=true use-adaptive-dp=false'
+
+# AdaPriv (Adaptive DP)
+flwr run . --run-config 'use-dp=true use-adaptive-dp=true'
+```
