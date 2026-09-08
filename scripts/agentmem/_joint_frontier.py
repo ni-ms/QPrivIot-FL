@@ -201,9 +201,6 @@ def figure(J):
     axL.plot(x, [r["tpr_d"] for r in J], "^-", color="#2ca02c", lw=2,
              label="attack TPR@1\\%FPR @ $\\varepsilon\\approx9.3$")
     axL.axhline(0.01, ls=":", color="grey", lw=1)
-    axL.text(len(Ks) - 1.02, 0.028, "1\\% FPR floor", ha="right", fontsize=7.5, color="grey")
-    axL.axvspan(-0.35, 2.35, color="#2ca02c", alpha=0.06)
-    axL.text(1.0, 0.93, "usable regime", ha="center", fontsize=8, color="#2ca02c")
     axL.set_xticks(x); axL.set_xticklabels(Ks)
     axL.set_xlabel("memory fidelity $K$ (buckets)")
     axL.set_ylabel("fraction")
@@ -220,9 +217,6 @@ def figure(J):
     axR.plot(x, [r["auc_d"] for r in J], "^-", color="#2ca02c", lw=2,
              label="calibrated LiRA @ $\\varepsilon\\approx9.3$")
     axR.axhline(0.5, ls=":", color="grey", lw=1)
-    axR.annotate("proxy reports\n\\emph{chance} here", xy=(0, 0.504), xytext=(0.45, 0.63),
-                 fontsize=7.5, color="#9467bd",
-                 arrowprops=dict(arrowstyle="->", color="#9467bd", lw=1))
     axR.set_xticks(x); axR.set_xticklabels(Ks)
     axR.set_xlabel("memory fidelity $K$ (buckets)")
     axR.set_ylabel("membership-inference AUC")

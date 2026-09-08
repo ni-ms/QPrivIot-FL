@@ -164,17 +164,12 @@ def fig_projection_ablation(_unused=None):
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(9.0, 3.9))
     # Direct-label at the LEFT end, where the three series are well separated; they
     # converge by construction at d=384 (identity projection), so labelling there collides.
-    dy = {"data-PCA (leaky)": 9, "randproj (free)": 9, "publicPCA (free)": -13}
     for name, ds, priv, tail, colour, marker, ls in series:
         for ax, ys in ((axL, priv), (axR, tail)):
             ax.plot(ds, ys, marker=marker, linestyle=ls, color=colour, lw=2.0,
                     ms=6.5, mec="white", mew=1.0, label=name, zorder=3)
-        axL.annotate(name, (ds[0], priv[0]), textcoords="offset points",
-                     xytext=(6, dy.get(name, 8)), fontsize=7.5, color=colour, va="center")
-
-    # post-DP floor: DP pins leakage at chance for EVERY d and every projection
-    axR.axhspan(0.50, 0.57, color="0.85", alpha=0.6, zorder=0)
-    axR.text(38, 0.535, "post-DP (all projections, all d)", fontsize=7, color="0.35")
+    
+    axL.legend(fontsize=7.5, frameon=False)
 
     for ax in (axL, axR):
         ax.set_xscale("log", base=2)
@@ -192,7 +187,6 @@ def fig_projection_ablation(_unused=None):
     axR.set_title("(b) the leakage gradient is an artifact too", fontsize=9.5)
     axR.set_ylim(0.48, 1.02)
     axR.legend(fontsize=7.5, loc="center right", frameon=False)
-    axR.text(384, 0.487, "identity proj.", fontsize=6.5, color="0.45", ha="center", va="bottom")
 
     fig.tight_layout()
     for ext in ("png", "pdf"):
