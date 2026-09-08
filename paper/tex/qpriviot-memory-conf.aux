@@ -1,0 +1,189 @@
+\relax 
+\citation{xu2024amem}
+\citation{chhikara2024mem0}
+\citation{wang2025mextra}
+\citation{chen2026mrmmia}
+\citation{rezazadeh2025collabmem}
+\citation{chen2026memprivacy}
+\citation{abouelenein2026dpdatastore}
+\citation{bonawitz2017secagg}
+\citation{agarwal2021skellam}
+\citation{hou2025popri}
+\citation{chen2025fedse}
+\citation{lin2026survey}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{}\protected@file@percent }
+\newlabel{sec:intro}{{I}{1}{}{section.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {I-}0a}Agent memory is the new sensitive payload.}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {I-}0b}Why the obvious defenses are insufficient.}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {I-}0c}Our approach.}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {I-}0d}Why this payload, and why now.}{1}{}\protected@file@percent }
+\citation{mcmahan2017fedavg}
+\citation{bonawitz2017secagg}
+\citation{dwork2014foundations}
+\citation{agarwal2021skellam}
+\citation{kairouz2021ddgauss,abadi2016dpsgd}
+\citation{xu2024amem}
+\citation{chhikara2024mem0}
+\citation{wang2025mextra}
+\citation{chen2026mrmmia}
+\citation{shokri2017mia}
+\citation{rezazadeh2025collabmem}
+\citation{chen2026memprivacy}
+\citation{abouelenein2026dpdatastore}
+\citation{bassily2014erm,chen2022price}
+\citation{achlioptas2003rp}
+\citation{charikar2002simhash}
+\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{2}{}\protected@file@percent }
+\newlabel{sec:related}{{II}{2}{}{section.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {II-}0a}Federated DP with secure aggregation and discrete noise.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {II-}0b}Privacy of LLM-agent memory.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {II-}0c}Federated retrieval / datastores.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {II-}0d}Dimension dependence of DP.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Threat Model and Problem Setup}{2}{}\protected@file@percent }
+\newlabel{sec:threat}{{III}{2}{}{section.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-}0a}Parties.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-}0b}Goal.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-}0c}Trust / adversary.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-}0d}Threat boundary.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-}0e}Utility.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Bucketed Centroid Memory}{2}{}\protected@file@percent }
+\newlabel{sec:centroid}{{IV}{2}{}{section.4}{}}
+\newlabel{eq:centroid}{{1}{2}{}{equation.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {V}Private Release: SecAgg + Skellam}{2}{}\protected@file@percent }
+\newlabel{sec:release}{{V}{2}{}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Clipping, quantisation, and sensitivity}{2}{}\protected@file@percent }
+\newlabel{sec:clipping}{{\mbox  {V-A}}{2}{}{subsection.5.1}{}}
+\citation{mcsherry2007expmech}
+\citation{agarwal2021skellam}
+\citation{mironov2017rdp}
+\citation{wu2024longmemeval}
+\citation{reimers2019sbert}
+\citation{carlini2022lira}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}The clip bound must be public}{3}{}\protected@file@percent }
+\newlabel{sec:clip}{{\mbox  {V-B}}{3}{}{subsection.5.2}{}}
+\newlabel{eq:clip-sens}{{2}{3}{}{equation.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Vector-only release}{3}{}\protected@file@percent }
+\newlabel{sec:vector-only}{{\mbox  {V-C}}{3}{}{subsection.5.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Privacy accounting}{3}{}\protected@file@percent }
+\newlabel{sec:accounting}{{\mbox  {V-D}}{3}{}{subsection.5.4}{}}
+\newlabel{eq:skellam-rdp}{{3}{3}{}{equation.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}The full mechanism}{3}{}\protected@file@percent }
+\newlabel{sec:algorithm}{{\mbox  {V-E}}{3}{}{subsection.5.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Experimental Setup}{3}{}\protected@file@percent }
+\newlabel{sec:setup}{{VI}{3}{}{section.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VI-}0a}Datasets}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VI-}0b}Embeddings}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VI-}0c}Mechanism \& Protocol}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Results}{3}{}\protected@file@percent }
+\newlabel{sec:results}{{VII}{3}{}{section.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-A}}The joint frontier: both axes, one operating point}{3}{}\protected@file@percent }
+\newlabel{sec:frontier}{{\mbox  {VII-A}}{3}{}{subsection.7.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-B}}Calibrated attack: LiRA membership inference}{3}{}\protected@file@percent }
+\newlabel{sec:lira}{{\mbox  {VII-B}}{3}{}{subsection.7.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-C}}The dimension crossover is a projection artifact}{3}{}\protected@file@percent }
+\newlabel{sec:crossover}{{\mbox  {VII-C}}{3}{}{subsection.7.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces $\sigma \to \varepsilon $ at the $K = 32$, $d = 32$ operating point ($\delta = 10^{-5}$). Every $\varepsilon $ is the \emph  {total}: the Skellam release plus the $\varepsilon _c = 0.1$ spent DP-selecting the clip bound (\S  \ref {sec:clip}). The projection and $B := C$ contribute nothing. The ``classic'' column is the label the exploration grid was run under and is \emph  {invalid} for $\varepsilon > 1$; it is shown only to map the run labels onto the rigorous budgets. $\sigma $ is given to four decimals because each $\varepsilon $ is computed at the \emph  {exact} $\sigma $ the grid was run at ($\sigma = \sqrt  {2\ln (1.25/\delta )}\,/\,\text  {label}$); rounding $\sigma $ to three decimals first shifts the budget by ${\sim }0.01$.}}{4}{}\protected@file@percent }
+\newlabel{tab:sigma-eps}{{I}{4}{}{table.1}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces Private Federated Memory Aggregation (SecAgg $+$ Skellam, vector-only release). Public/shared parameters are as listed in the text above.}}{4}{}\protected@file@percent }
+\newlabel{alg:main}{{1}{4}{}{algorithm.1}{}}
+\newlabel{alg:global-clip}{{8}{4}{}{algorithm.1}{}}
+\newlabel{alg:noise}{{11}{4}{}{algorithm.1}{}}
+\newlabel{alg:normalize}{{18}{4}{}{algorithm.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-D}}The uncalibrated cosine proxy substantially underestimates leakage in the deployment-relevant regime}{4}{}\protected@file@percent }
+\newlabel{sec:proxy-blind}{{\mbox  {VII-D}}{4}{}{subsection.7.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-E}}Distilled notes validation}{4}{}\protected@file@percent }
+\newlabel{sec:distilled}{{\mbox  {VII-E}}{4}{}{subsection.7.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VII-F}}Accounting and repeated release}{4}{}\protected@file@percent }
+\newlabel{sec:multiround}{{\mbox  {VII-F}}{4}{}{subsection.7.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces \textbf  {The joint frontier}: retrieval utility and \emph  {calibrated} leakage at the \textbf  {same} $K$ (LongMemEval-oracle, $d = 32$, vector-only; utility 5-seed, LiRA 3-seed $\times $ 48 shadows). Leakage is the offline-LiRA of \S  \ref {sec:lira}, not the cosine proxy; as \S  \ref {sec:proxy-blind} shows, that proxy reports chance at exactly the $K$ one would deploy. TPR@1\%FPR floor $= 0.010$.}}{5}{}\protected@file@percent }
+\newlabel{tab:frontier}{{II}{5}{}{table.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces \textbf  {(a) The joint frontier.} Utility retention falls monotonically with fidelity $K$ while clean leakage rises; DP pins the calibrated attack at the 1\% false-positive floor \emph  {uniformly}, so the frontier is governed by the utility axis alone and the coarse-$K$ regime dominates. \textbf  {(b) The proxy underestimates leakage where it matters.} The uncalibrated cosine proxy (purple) reports chance at $K = 32$ on the same clean release where the calibrated LiRA (red) reads AUC 0.833: the pool still exhibits leakage there (\S  \ref {sec:proxy-blind}).}}{5}{}\protected@file@percent }
+\newlabel{fig:joint-frontier}{{1}{5}{}{figure.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Calibrated offline-LiRA and reconstruction-decode extraction (LongMemEval oracle, $d = 32$, 3 seeds $\times $ 48 shadow releases). The clean release is far more leaky than the cosine proxy revealed, and DP still reduces the strong attack to near-chance levels on every axis at once.}}{5}{}\protected@file@percent }
+\newlabel{tab:lira}{{III}{5}{}{table.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Discussion and Limitations}{5}{}\protected@file@percent }
+\newlabel{sec:discussion}{{VIII}{5}{}{section.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VIII-A}}Strengths}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VIII-B}}Limitations}{5}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces LiRA across the fidelity sweep. Clean leakage rises with $K$; DP pins every cell at the false-positive floor.}}{6}{}\protected@file@percent }
+\newlabel{tab:lira-sweep}{{IV}{6}{}{table.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {V}{\ignorespaces \textbf  {(a) Private utility} under the three projections (topic-acc @ $\varepsilon \approx 9.3$, real \texttt  {all-MiniLM-L6-v2}, $N = 100$, $K = 32$; higher is better). Tiny-$d$ wins \emph  {only} under the leaky data-dependent PCA.}}{6}{}\protected@file@percent }
+\newlabel{tab:abl-utility}{{V}{6}{}{table.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {VI}{\ignorespaces \textbf  {(b) Leakage} under the three projections (tail-AUC at $K = 1024$; $0.5 =$ no leakage). The pre-DP gradient that motivated the crossover claim exists only under data-PCA; post-DP every cell is at chance.}}{6}{}\protected@file@percent }
+\newlabel{tab:abl-leakage}{{VI}{6}{}{table.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {VII}{\ignorespaces \textbf  {Calibrated} LiRA on the LLM-distilled payload (500 users, 6{,}116 notes, $K = 32$, $d = 32$; 3 seeds $\times $ 48 shadows): the realistic agent-memory object, measured with the attack \S  \ref {sec:proxy-blind} shows to be the only trustworthy one. The raw-turn row is Table~\ref {tab:frontier}'s $K = 32$ row, repeated for comparison at the \emph  {same} operating point.}}{6}{}\protected@file@percent }
+\newlabel{tab:distilled-lira}{{VII}{6}{}{table.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VIII-C}}Future Work}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {IX}Conclusion}{6}{}\protected@file@percent }
+\newlabel{sec:conclusion}{{IX}{6}{}{section.9}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces The dimension crossover is a property of the projection, not of the mechanism. \textbf  {(a)} Private utility: tiny-$d$ wins only under the data-dependent PCA; under either data-independent projection its advantage vanishes into the seed noise. \textbf  {(b)} Pre-DP leakage: data-PCA shows the rising gradient the crossover claim rested on; the honest projections are saturated. All three converge at $d = 384$, where the projection \emph  {is} the identity: the control. Shaded band: post-DP tail-AUC, flat at chance for every $d$ and every projection.}}{7}{}\protected@file@percent }
+\newlabel{fig:projection-ablation}{{2}{7}{}{figure.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {VIII}{\ignorespaces $\varepsilon $ decomposition at $\sigma = 0.6056$, $\delta = 10^{-5}$, $K = 32$, $d = 32$. The reported budget covers the \emph  {whole} pipeline, not just its last stage.}}{7}{}\protected@file@percent }
+\newlabel{tab:eps-decomp}{{VIII}{7}{}{table.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {IX}{\ignorespaces Buying a re-aggregation cadence inside a \textbf  {fixed} total budget ($\varepsilon = 9.31$, $K = 32$, $d = 32$, $\delta = 10^{-5}$; clip bound selected once, publicly). $\sigma $ is solved from the Skellam-RDP accountant at $T$ releases; retention is measured at that $\sigma $ (5 seeds), not extrapolated. The last column is what those $T$ releases would \emph  {actually} have cost had we kept the single-shot $\sigma = 0.606$ and simply re-released, i.e.\ the budget an unaccounted deployment would silently be spending.}}{7}{}\protected@file@percent }
+\newlabel{tab:multiround}{{IX}{7}{}{table.9}{}}
+\@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  A: Implementation Constraints}{7}{}\protected@file@percent }
+\newlabel{sec:app-constraints}{{A}{7}{}{section.Appendix.A}{}}
+\bibstyle{IEEEtran}
+\bibdata{../references}
+\bibcite{xu2024amem}{1}
+\bibcite{chhikara2024mem0}{2}
+\bibcite{wang2025mextra}{3}
+\bibcite{chen2026mrmmia}{4}
+\bibcite{rezazadeh2025collabmem}{5}
+\bibcite{chen2026memprivacy}{6}
+\bibcite{abouelenein2026dpdatastore}{7}
+\bibcite{bonawitz2017secagg}{8}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Distilled-notes utility (answer-recall@5). Density governs DP retention: the dense 500-user buckets ($K = 32$) retain \textbf  {89\%} at $\varepsilon \approx 9.3$, whereas the sparser 100-user pilot retains only 65\% at the same budget. More contributors per bucket $\Rightarrow $ cheaper DP.}}{8}{}\protected@file@percent }
+\newlabel{fig:distilled-utility}{{3}{8}{}{figure.3}{}}
+\@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  B: Client Dropout}{8}{}\protected@file@percent }
+\newlabel{sec:app-dropout}{{B}{8}{}{section.Appendix.B}{}}
+\@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  C: Occupancy Channel}{8}{}\protected@file@percent }
+\newlabel{sec:app-occupancy}{{C}{8}{}{section.Appendix.C}{}}
+\@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  D: At-Scale Generality}{8}{}\protected@file@percent }
+\newlabel{sec:app-at-scale}{{D}{8}{}{section.Appendix.D}{}}
+\@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  E: Utility in Detail}{8}{}\protected@file@percent }
+\newlabel{sec:app-utility}{{E}{8}{}{section.Appendix.E}{}}
+\@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  F: Proxy Leakage Details}{8}{}\protected@file@percent }
+\newlabel{sec:app-proxy}{{F}{8}{}{section.Appendix.F}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Retrieval utility vs privacy budget (LongMemEval oracle, $d = 32$). At coarse $K = 32$ the private pool tracks the clean curve (95\% retention at $\varepsilon \approx 9.3$) while higher-fidelity $K$ starves buckets and DP noise bites. Dotted lines mark per-$K$ chance. Error bars are 5-seed std. The $\varepsilon $ axis is the rigorous Skellam-RDP budget of \S  \ref {sec:accounting}, clip selection included.}}{8}{}\protected@file@percent }
+\newlabel{fig:utility-vs-eps}{{4}{8}{}{figure.4}{}}
+\@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  G: Live-Agent Harness Pitfall}{8}{}\protected@file@percent }
+\newlabel{sec:app-live-agent}{{G}{8}{}{section.Appendix.G}{}}
+\@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  H: Reproducibility}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{8}{}\protected@file@percent }
+\bibcite{agarwal2021skellam}{9}
+\bibcite{hou2025popri}{10}
+\bibcite{chen2025fedse}{11}
+\bibcite{lin2026survey}{12}
+\bibcite{mcmahan2017fedavg}{13}
+\bibcite{dwork2014foundations}{14}
+\bibcite{kairouz2021ddgauss}{15}
+\bibcite{abadi2016dpsgd}{16}
+\bibcite{shokri2017mia}{17}
+\bibcite{bassily2014erm}{18}
+\bibcite{chen2022price}{19}
+\bibcite{achlioptas2003rp}{20}
+\bibcite{charikar2002simhash}{21}
+\bibcite{mcsherry2007expmech}{22}
+\bibcite{mironov2017rdp}{23}
+\bibcite{wu2024longmemeval}{24}
+\@writefile{lot}{\contentsline {table}{\numberline {X}{\ignorespaces Client dropout silently breaks the guarantee. True $\varepsilon $ realised when each of $N$ clients injects a naive $\mu /N$ noise share but only $M$ survive.}}{9}{}\protected@file@percent }
+\newlabel{tab:dropout}{{X}{9}{}{table.10}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {XI}{\ignorespaces Empty-bucket rate by fidelity $K$ (5 anchor seeds). Every retrieval number in this paper is reported at $K \leq 256$, where at most one bucket of 256 is ever empty.}}{9}{}\protected@file@percent }
+\newlabel{tab:occupancy-rate}{{XI}{9}{}{table.11}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {XII}{\ignorespaces Occupancy-detection AUC (empty vs occupied; $0.5 =$ undetectable), against the total $\varepsilon $ of the release. No rule is simultaneously free and accurate.}}{9}{}\protected@file@percent }
+\newlabel{tab:occupancy-detect}{{XII}{9}{}{table.12}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {XIII}{\ignorespaces At-scale utility (LongMemEval \texttt  {s}, 246k notes; evidence-recall@5, $d = 32$, 5-seed).}}{9}{}\protected@file@percent }
+\newlabel{tab:at-scale-utility}{{XIII}{9}{}{table.13}{}}
+\bibcite{reimers2019sbert}{25}
+\bibcite{carlini2022lira}{26}
+\@writefile{lot}{\contentsline {table}{\numberline {XIV}{\ignorespaces At-scale leakage (LongMemEval \texttt  {s}). The vulnerable tail all but vanishes, and membership inference is at chance even on the clean pool.}}{10}{}\protected@file@percent }
+\newlabel{tab:at-scale-leakage}{{XIV}{10}{}{table.14}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {XV}{\ignorespaces LongMemEval-oracle retrieval utility by bucket fidelity $K$ (evidence-recall@5, $d = 32$, vector-only release, 5-seed mean $\pm $ std).}}{10}{}\protected@file@percent }
+\newlabel{tab:utility}{{XV}{10}{}{table.15}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {XVI}{\ignorespaces The uncalibrated cosine proxy (LongMemEval oracle; tail-AUC over buckets with $\leq 3$ contributors, $0.5 =$ no leakage). \textbf  {Retained for contrast only.} The tail it stratifies on is all but \emph  {empty} at $K \leq 128$ (${\leq }0.03\%$ of members, i.e.\ a handful of targets, too few to score), so the proxy has nothing to report at the recommended operating point, while the calibrated attack of \S  \ref {sec:lira} breaks that same release (Table~\ref {tab:frontier}). Reading privacy off this table alone is the error \S  \ref {sec:proxy-blind} documents. The ``above chance'' column is computed from the unrounded mean and std, so it will not reproduce exactly from the rounded cells printed here.}}{10}{}\protected@file@percent }
+\newlabel{tab:leakage}{{XVI}{10}{}{table.16}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {XVII}{\ignorespaces The published attacks against a live agent (60 users, 883 distilled notes, $K = 256$, $d = 32$, the paper's mechanism: randproj $+$ DP clip; 40 extraction and 120 membership trials per seed, 3 seeds).}}{10}{}\protected@file@percent }
+\newlabel{tab:live-agent}{{XVII}{10}{}{table.17}{}}
+\gdef \@abspage@last{10}

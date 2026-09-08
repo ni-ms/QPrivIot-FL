@@ -1,0 +1,203 @@
+
+
+{
+Private Federated Aggregation of LLM-Agent Memory with Secure Aggregation and Differential Privacy}
+
+{Independent Researcher\\
+Bengaluru, Karnataka, India \\
+nikmsharma@gmail.com \\
+ORCID: 0000-0002-1651-0879}
+}
+
+LLM agents accumulate per-user memory (distilled notes and preferences) that makes them personal. Pooling it across users would give a fleet a shared routing prior, but memory is exactly the sensitive artifact: published extraction and membership-inference attacks recover verbatim user facts. We aggregate per-user memory-note embeddings into a bucketed centroid memory under Secure Aggregation composed with the discrete Skellam mechanism, so the pool carries a central differential-privacy guarantee with no trusted curator and no note in the clear. We evaluate on real long-horizon conversational memory and LLM-distilled agent notes, reading utility and leakage at the same operating point. Four findings. First, on a joint frontier measuring both axes at every bucket fidelity, the coarse regime offers strong utility with rigorous privacy guarantees: the pool keeps {95\
+
+Differential privacy, Secure aggregation, Skellam mechanism, LLM agent memory, Federated learning, Membership inference
+
+ Production LLM-agent frameworks such as A-MEM~[cite] and Mem0~[cite] persist a per-user store of distilled notes: ``the user is allergic to penicillin,'' ``prefers metric units,'' ``is migrating a Postgres 14 cluster.'' This memory is what makes an agent personal, and it is also a dense concentrate of personally identifying information. A natural, high-value idea is to share memory across users, so that a fleet of agents can profit from what the fleet collectively knows. But na\"ively pooling raw notes is a privacy disaster, and recent work shows the threat is concrete: MEXTRA~[cite] extracts verbatim memory content, and MRMMIA~[cite] performs membership inference against agent memory with high success.
+
+ Access-control layers (Collaborative Memory~[cite]) and on-device masking (MemPrivacy~[cite]) restrict who sees a note but provide no formal guarantee over the aggregate, and a curated central datastore~[cite] reintroduces a trusted party. What is missing is a mechanism that (a) needs no trusted curator, (b) gives a central-DP guarantee over the shared pool, and (c) is shown to actually degrade the known attacks while keeping the pool useful.
+
+ We treat federated memory aggregation as a secure summation of per-user bucketed embeddings. Each user projects their notes to a working dimension [math] with a public-seed random projection, maps them into [math] shared buckets (random-hyperplane LSH), forms a per-bucket sum-vector, and contributes it through SecAgg~[cite] so the server sees only the masked sum; the Skellam mechanism~[cite] adds calibrated discrete noise that composes under summation, yielding a single distributed-DP guarantee on the pooled centroid memory. Retrieval is cosine lookup against the noised centroids. The cryptographic path is used verbatim from federated discrete-DP work; the novelty is the payload (agent-memory embeddings) and the evaluation (a measured attack-success drop).
+
+ Federated DP for LLM adaptation is saturated, and recent federated-privacy work for LLMs targets other objects: DP synthetic-data generation (POPri~[cite]) and privacy-constrained agent self-evolution (Fed-SE~[cite]). Contemporaneous agent-memory security surveys~[cite] catalogue attacks and access-control defenses but no curator-free DP aggregation mechanism. Federated agent-memory aggregation under SecAgg [math] discrete Skellam DP is thus an open seam. Crucially, agent-memory objects are genuinely tiny-dimensional and often already discrete, the regime where the discrete Skellam mechanism is most efficient.
+
+*{Contributions}
+
+   Federated private memory aggregation using SecAgg and Skellam DP, yielding a curator-free central-DP shared routing prior.
+   Joint utility--leakage evaluation using calibrated LiRA. We demonstrate a positive endpoint on the joint frontier where the pool keeps 95\
+   Demonstration that cosine proxies and data-dependent PCA confound privacy evaluation. The uncalibrated cosine proxy commonly used in the literature substantially underestimates leakage relative to calibrated evaluation, and data-dependent projection can manufacture an apparent dimension crossover.
+   Full accounting including preprocessing, clipping, and repeated release. Every parameter is public or DP-accounted, and we evaluate the realistic cost of re-aggregating memory over a deployment's lifecycle.
+
+ Federated learning~[cite] trains on decentralised data without centralising it, and SecAgg~[cite] lets a server compute a sum of client vectors without seeing any summand. To obtain a differential-privacy guarantee~[cite] that composes under that sum without a trusted curator, discrete mechanisms are used, such as the Skellam mechanism~[cite], which is closed under addition and efficient at low bit-width. Prior deployments target gradient payloads~[cite]. We reuse this path verbatim but change the payload to agent-memory embeddings and the objective to retrieval.
+
+ Agent frameworks A-MEM~[cite] and Mem0~[cite] persist distilled per-user memories. Their privacy is under active attack: MEXTRA~[cite] extracts memory content and MRMMIA~[cite] runs membership inference~[cite]. Defenses so far are access control~[cite] and on-device masking~[cite], neither giving an aggregate formal guarantee. We provide the missing mechanism-side guarantee and cite the attacks as our evaluation harness.
+
+ DP Datastore Generation~[cite] partitions data with locality-sensitive hashing and adds calibrated DP noise to each bucket's aggregate. However, it is centralized and single-curator, uses generic additive noise with no secure aggregation, and targets classification, not agent memory. Our approach provides a federated, curator-free release under SecAgg with the Skellam mechanism, using the agent-memory embedding payload.
+
+ That utility degrades with dimension under DP is classical~[cite]. Section [ref] shows that the apparent coupled crossover, in which dimension governs pre-DP leakage and DP utility-retention simultaneously, is an artifact of a data-dependent projection.
+
+ [math] users, each with a local agent holding a set of memory notes; an honest-but-curious aggregation server; and downstream agents that query the shared memory.
+
+ Produce a single shared memory pool (a set of [math] centroid embeddings) that any agent can query by cosine similarity to retrieve relevant knowledge contributed by the fleet, such that the pool carries a central [math]-DP guarantee at user granularity and no individual user's notes can be reconstructed or their membership inferred.
+
+ No trusted curator: under SecAgg the server observes only the masked sum. The adversary is a recipient of the released pool. It mounts Membership inference (decide whether the user who owns a note [math] contributed to the pool, measuring ROC-AUC) and Extraction (advantage in reconstructing an in-bucket member embedding from the centroid). We measure leakage over all buckets with a calibrated attack (Section [ref]), and additionally evaluate a low-count tail lens to connect with prior proxy-based attacks. 
+
+ Our adversary is passive. Active, colluding clients (e.g., poisoning) and participation metadata (who participated in a round) are explicitly out of scope. We specify mandatory participation with padded dummy payloads to address the latter, but do not measure it.
+
+ For a query [math], retrieval routes to the top-[math] centroids by cosine; utility is whether the right content is retrieved.
+
+Let each note [math] of user [math] have embedding [math] from a sentence encoder. We reduce to a working dimension [math] with a public-seed Gaussian random projection~[cite] [math], [math], L2-normalize, and assign to one of [math] buckets by random-hyperplane LSH~[cite]: fix [math] random anchors [math] and set [math]. Both [math] and the anchors are drawn from a published seed and never touch user data, so shipping them releases nothing.
+
+Each user forms, per bucket [math], a sum-vector [math] and a count [math]. The (non-private) shared centroid is:
+
+Retrieval for query [math] returns the top-[math] buckets by [math].
+
+A user's contribution to the release is the whole payload: the concatenation [math]. We clip [math] globally, to a single L2 bound [math], and only then quantise to integers on a fixed grid of resolution [math] ([math], [math] the quantiser bound). This yields integer vectors amenable to SecAgg and discrete noise, with user-level L2 sensitivity exactly [math]. (Two datasets are neighbours if one is obtained from the other by adding or removing a single user.)
+
+[math] and [math] must not be derived directly from the private corpus without accounting.
+[math] is free. Since every note is L2-unit and the payload is clipped first, [math] for every coordinate [math].
+[math] is DP-selected. We choose [math] from a public geometric grid with the exponential mechanism~[cite] on the rank utility [math]. The sensitivity is:
+
+We spend [math], which costs {0.2\
+
+Each user adds Skellam noise (a difference of two Poissons) to their quantised vector and submits it through SecAgg, so the server recovers only [math]. The sum of independent Skellams is Skellam, meaning the released sum carries the target noise with no trusted curator. 
+
+Releasing two channels (the sum-vector and the counts) costs two RDP compositions. For the direction of the retrieval centroid, normalisation cancels the count. Releasing only the summed vector yields identical retrieval at [math] tighter [math]. The count channel's one non-redundant use is occupancy (identifying empty buckets), but as detailed in Appendix~[ref], no occupancy rule is simultaneously free and accurate.
+
+We account with the exact discrete Skellam guarantee~[cite], converting to [math] through R\'enyi DP~[cite]:
+
+with [math] the per-coordinate released variance, [math], and [math]. We set [math]. 
+
+[Table: [math] at the [math], [math] operating point
+  ($ = 10^{-5]
+
+Algorithm~[ref] defines the end-to-end procedure. Detailed implementation constraints (modular field size, mandatory participation padding, and client dropout handling) are discussed in Appendices [ref] and [ref].
+
+[Algorithm omitted]
+
+ (1) LongMemEval (oracle)~[cite]: real long-horizon conversational memory (500 users, 10,957 note embeddings). (2) LongMemEval (: full-haystack variant (246,073 notes) for at-scale checks. (3) LLM-distilled notes (A-MEM/Mem0-style): 6,116 distilled notes, the realistic payload. (4) Synthetic controls: 20-Newsgroups.
+
+  (384-d)~[cite], reduced to [math] by a public-seed Gaussian random projection.
+
+ We use the faithful crypto path. The clip bound [math] is DP-selected ([math]). We report 5-seed means [math] std for utility and 3-seed [math] 48 shadow releases for the calibrated LiRA.
+
+Every [math] value is the rigorous Skellam-RDP label, covering the whole pipeline including the clip-bound selection. 
+
+We measure utility and the calibrated LiRA attack at every [math], reporting the joint frontier (Table~[ref], Fig.~[ref]a).
+
+[Table: {The joint frontier]
+
+[Figure: {(a) The joint frontier.]
+
+   The DP release reduces calibrated attack performance to near-chance levels at every [math]. LiRA AUC lands in [math]--[math] and TPR@1\
+   The operating point is set by retention. Retention falls $95  13\
+   Closed-set reconstruction bound. At [math], reconstruction-decode only halves ([math]) against a chance floor of [math]. DP does not defeat closed-set reconstruction at the recommended point, although this metric is identical to utility and assumes the adversary already holds the notes.
+
+The uncalibrated cosine similarity score is actively misleading (Section [ref]). We run the modern MIA standard~[cite]: an offline LiRA testing with the per-target likelihood ratio across shadow releases.
+
+[Table: Calibrated offline-LiRA and reconstruction-decode extraction (LongMemEval oracle,
+  [math], 3 seeds [math] 48 shadow releases). The clean release is far more leaky than the
+  cosine proxy revealed, and DP still reduces the strong attack to near-chance levels on every axis at once.]
+
+[Table: LiRA across the fidelity sweep. Clean leakage rises with [math]; DP pins every cell
+  at the false-positive floor.]
+
+Calibration exposes that on the clean pool an adversary re-identifies members at ${95\
+
+Under a PCA projection fit on the users' own notes, growing [math] appears to simultaneously raise pre-DP leakage and lower DP utility-retention. However, a data-fit PCA is an unaccounted release. When running with a public-seed Gaussian projection () or a disjoint public PCA, the effect vanishes (Tables~[ref],~[ref], Fig.~[ref]). 
+
+[Table: {(a) Private utility]
+
+[Table: {(b) Leakage]
+
+[Figure: The dimension crossover is a property of the projection, not of the
+  mechanism. {(a)]
+
+Tiny-[math] remains a reasonable engineering default ([math] smaller payload) but it is not a privacy/utility free lunch. Data-dependent preprocessing is both an unaccounted release and a confound that manufactures this dimension effect.
+
+Comparing the uncalibrated cosine proxy to the calibrated attack (Fig.~[ref]b), at [math] the proxy reads AUC 0.504 on the identical clean release where the calibrated LiRA reads AUC 0.833 and [math]-above-floor TPR. The proxy fails to detect leakage revealed by calibrated LiRA evaluation, and manufactures a false story that leakage is only a sparse, high-[math] phenomenon.
+
+[Table: {Calibrated]
+
+[Figure: Distilled-notes utility (answer-recall@5). Density governs DP
+  retention: the dense 500-user buckets ([math]) retain {89\
+  [math], whereas the sparser 100-user pilot retains only 65\
+  same budget. More contributors per bucket [math] cheaper DP.]
+
+We run the calibrated LiRA directly on the distilled pool (Table~[ref]). The clean distilled pool exhibits substantial measurable leakage, and the private release reduces attack performance to the floor. On the realistic agent-memory payload, the attack is defeated at the same operating point and budget as on raw turns.
+
+The total [math] decomposes cleanly (Table~[ref]). The clip bound selection costs 0.2\
+
+[Table: [math] decomposition at [math], $ = 10^{-5]
+
+[Table: Buying a re-aggregation cadence inside a {fixed]
+
+A deployed memory is re-aggregated as users write notes. Re-releasing [math] times at the single-shot noise scale rapidly depletes the budget. However, because the required [math] grows only as [math], a cadence can be bought up front: a pool re-aggregated monthly for a full year fits inside the same [math] at 81\
+
+Membership protection. The clean pool leaks at every fidelity, and DP pins the calibrated attack at the false-positive floor uniformly. The privacy axis is flat in [math], separating the privacy guarantee from the utility tuning.
+
+Calibrated evaluation. The analysis demonstrates the limitations of standard uncalibrated proxies and data-dependent projections, revealing the true leakage of the status-quo and validating the mechanism under a stronger lens.
+
+Full accounting. The mechanism bounds the whole pipeline, including data-independent projection, DP clip-bound selection, and repeated lifecycle releases.
+
+Open-set inversion not evaluated. Open-set embedding inversion remains untested and is an important direction for future work. While membership is driven to chance, closed-set reconstruction is not (Section [ref]).
+
+Active adversaries not evaluated. Our adversary is passive. Robust aggregation against poisoning from active, colluding clients is an orthogonal open problem.
+
+Benchmark limitations. The pool is a routing prior, not a note exchange. We evaluate routing fidelity, but LongMemEval is a personal-recall benchmark where cross-user knowledge does not naturally transfer. 
+
+Future research should explore downstream task-transfer benchmarks to validate the end-to-end performance gains of a shared routing prior, and evaluate the mechanism's robustness against active adversaries or longitudinal drift in real deployments.
+
+LLM agents accumulate per-user memory that makes them personal but contains sensitive information. Pooling this memory across users can provide a shared routing prior for the fleet, but naively sharing it can expose verbatim facts to extraction and membership-inference attacks. We addressed this problem by aggregating per-user memory-note embeddings into a bucketed centroid memory under Secure Aggregation composed with the discrete Skellam mechanism, ensuring that the pool carries a central differential-privacy guarantee with no trusted curator.
+
+Our main finding is that on a joint frontier measuring utility and leakage, the coarse-fidelity regime is both offering strong utility with rigorous privacy guarantees. At [math], the pool retains 95\
+
+Open-set embedding inversion remains untested and is an important direction for future work. Additionally, future research should explore downstream task-transfer benchmarks to validate the end-to-end performance gains of a shared routing prior, as well as evaluate the mechanism's robustness against active adversaries and poisoning in real-world, multi-round deployments.
+
+Modular field size. SecAgg sums in a finite field [math]. At our operating point, a prime [math] is sufficient. The reference implementation uses .
+Mandatory participation. A client with no new notes must submit an all-zero payload with Skellam noise and a mask, ensuring uniform participation indistinguishable from active clients.
+Global clipping cross-bucket sensitivity. Clipping each bucket separately would yield sensitivity [math] (where [math] is buckets touched). We clip globally, so the full payload sensitivity remains [math].
+
+If [math] clients inject [math] but only [math] survive, the effective noise drops and the guarantee degrades (Table~[ref]). We specify calibrating noise to a survival floor [math] (Algorithm~[ref]) or using fault-tolerant noise reconstruction.
+
+[Table: Client dropout silently breaks the guarantee. True [math] realised when
+  each of [math] clients injects a naive [math] noise share but only [math] survive.]
+
+Normalisation turns a pure-noise empty bucket into a unit vector. At [math], empty buckets are rare (Table~[ref]). If detected, the binary user-indicator channel is the optimal privacy strategy but still costs a full second composition (Table~[ref]). No rule is simultaneously free and accurate, as occupancy and membership are the same signal.
+
+[Table: Empty-bucket rate by fidelity [math] (5 anchor seeds). Every retrieval number in
+  this paper is reported at [math], where at most one bucket of 256 is ever empty.]
+
+[Table: Occupancy-detection AUC (empty vs occupied; [math] undetectable), against the total
+  [math] of the release. No rule is simultaneously free and accurate.]
+
+On the full LongMemEval  variant (246k notes), utility retention is 97--100\
+
+[Table: At-scale utility (LongMemEval {s]
+
+[Table: At-scale leakage (LongMemEval {s]
+
+Retrieval survives DP in the coarse-[math] regime and degrades gracefully as memory fidelity [math] grows (Table~[ref], Fig~[ref]).
+
+[Table: LongMemEval-oracle retrieval utility by bucket fidelity [math]
+  (evidence-recall@5, [math], vector-only release, 5-seed mean [math] std).]
+
+[Figure: Retrieval utility vs privacy budget (LongMemEval oracle, [math]).
+  At coarse [math] the private pool tracks the clean curve (95\
+  [math]) while higher-fidelity [math] starves buckets and DP noise
+  bites. Dotted lines mark per-[math] chance. Error bars are 5-seed std. The [math]
+  axis is the rigorous Skellam-RDP budget of {sec:accounting]
+
+Under the cosine proxy, leakage appears to concentrate strictly in the sparse tail (Table~[ref]), a conclusion calibration proves false.
+
+[Table: The uncalibrated cosine proxy (LongMemEval oracle; tail-AUC over buckets with
+  [math] contributors, [math] no leakage). {Retained for contrast only.]
+
+Against a live agent (Table~[ref]), the raw-text baseline is fully extractable. Our release yields MEXTRA recovery of [math] (the detector's false-positive floor) and MRMMIA-AUC of [math]. The membership probe must not draw non-members from the public decode corpus, otherwise the attack artefactually scores below chance.
+
+[Table: The published attacks against a live agent (60 users, 883 distilled notes,
+  [math], [math], the paper's mechanism: randproj [math] DP clip; 40 extraction and 120
+  membership trials per seed, 3 seeds).]
+
+Active code lives in ; the pooled crypto is .
+
